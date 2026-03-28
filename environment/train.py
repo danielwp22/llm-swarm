@@ -5,7 +5,7 @@ import numpy as np
 from collections import deque
 import os
 
-from environment.model import Actor, Critic, dict_obs_to_tensor, batch_dict_obs
+from environment.model import Actor, ActorCNN, ActorMLP, Critic, dict_obs_to_tensor, batch_dict_obs
 
 
 class RolloutBuffer:
@@ -105,6 +105,7 @@ def train_mappo(
     device='cpu',
     save_dir='models',
     log_interval=10,
+    actor_type='mlp',
 ):
     """
     Train multi-agent policy using MAPPO (Multi-Agent PPO).
@@ -128,14 +129,30 @@ def train_mappo(
         device: Device to train on
         save_dir: Directory to save models
         log_interval: Interval for logging progress
+        actor_type: Actor architecture ('mlp' or 'cnn')
 
     Returns:
         actor: Trained actor network
         critic: Trained critic network
+        history: Training metrics history
     """
     # Create models
-    actor = Actor(obs_radius=obs_radius).to(device)
+    if actor_type == 'mlp':
+        actor = ActorMLP(obs_radius=obs_radius).to(device)
+        print(f"Using ActorMLP architecture")
+    elif actor_type == 'cnn':
+        actor = ActorCNN(obs_radius=obs_radius).to(device)
+        print(f"Using ActorCNN architecture")
+    else:
+        raise ValueError(f"Unknown actor_type: {actor_type}. Choose 'mlp' or 'cnn'")
+
     critic = Critic(n_agents=n_agents, obs_radius=obs_radius).to(device)
+
+    # Print parameter counts
+    actor_params = sum(p.numel() for p in actor.parameters())
+    critic_params = sum(p.numel() for p in critic.parameters())
+    print(f"Actor parameters: {actor_params:,}")
+    print(f"Critic parameters: {critic_params:,}")
 
     # Create optimizers
     actor_optimizer = optim.Adam(actor.parameters(), lr=lr_actor)
@@ -342,7 +359,7 @@ def train_mappo(
     return actor, critic, history
 
 
-def load_models(actor_path, critic_path, n_agents, obs_radius=5, device='cpu'):
+def load_models(actor_path, critic_path, n_agents, obs_radius=5, device='cpu', actor_type='mlp'):
     """
     Load trained models from checkpoint.
 
@@ -352,12 +369,19 @@ def load_models(actor_path, critic_path, n_agents, obs_radius=5, device='cpu'):
         n_agents: Number of agents
         obs_radius: Observation radius
         device: Device to load models on
+        actor_type: Actor architecture ('mlp' or 'cnn')
 
     Returns:
         actor: Loaded actor network
         critic: Loaded critic network
     """
-    actor = Actor(obs_radius=obs_radius).to(device)
+    if actor_type == 'mlp':
+        actor = ActorMLP(obs_radius=obs_radius).to(device)
+    elif actor_type == 'cnn':
+        actor = ActorCNN(obs_radius=obs_radius).to(device)
+    else:
+        raise ValueError(f"Unknown actor_type: {actor_type}. Choose 'mlp' or 'cnn'")
+
     critic = Critic(n_agents=n_agents, obs_radius=obs_radius).to(device)
 
     actor.load_state_dict(torch.load(actor_path, map_location=device))

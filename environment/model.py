@@ -4,13 +4,14 @@ import torch.nn.functional as F
 import numpy as np
 
 
-class Actor(nn.Module):
+class ActorCNN(nn.Module):
     """
-    Decentralized Actor network for MAPPO.
+    CNN-based Decentralized Actor network for MAPPO.
+    Uses convolutional layers to process spatial local grid.
     Takes local observations and outputs action probabilities.
     """
     def __init__(self, obs_radius=5, hidden_dim=128):
-        super(Actor, self).__init__()
+        super(ActorCNN, self).__init__()
 
         self.obs_radius = obs_radius
         local_grid_size = 2 * obs_radius + 1
@@ -90,6 +91,94 @@ class Actor(nn.Module):
             log_prob = dist.log_prob(action)
 
         return action, log_prob
+
+
+class ActorMLP(nn.Module):
+    """
+    MLP-based Decentralized Actor network for MAPPO.
+    Flattens local grid and processes with fully connected layers.
+    Simpler architecture that may work better for sparse symbolic observations.
+    """
+    def __init__(self, obs_radius=5, hidden_dim=256):
+        super(ActorMLP, self).__init__()
+
+        self.obs_radius = obs_radius
+        local_grid_size = 2 * obs_radius + 1
+
+        # Flatten local grid: (11, 11, 3) = 363 dimensions
+        grid_input_size = local_grid_size * local_grid_size * 3
+
+        # State features: position (2) + target (2) + velocity (2) = 6 dimensions
+        state_input_size = 6
+
+        # Total input size
+        total_input_size = grid_input_size + state_input_size  # 363 + 6 = 369
+
+        # MLP layers
+        self.fc1 = nn.Linear(total_input_size, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim // 2)
+
+        # Action head (9 actions: stay + 8 directions)
+        self.action_head = nn.Linear(hidden_dim // 2, 9)
+
+    def forward(self, obs):
+        """
+        Args:
+            obs: Dict with keys 'local_grid', 'self_position', 'target_position', 'velocity'
+        Returns:
+            action_probs: Probability distribution over actions
+        """
+        # Flatten local grid
+        local_grid = obs['local_grid']  # (batch, 11, 11, 3)
+        grid_flat = local_grid.flatten(1)  # (batch, 363)
+
+        # Concatenate state features
+        self_pos = obs['self_position']  # (batch, 2)
+        target_pos = obs['target_position']  # (batch, 2)
+        velocity = obs['velocity']  # (batch, 2)
+        state_features = torch.cat([self_pos, target_pos, velocity], dim=1)  # (batch, 6)
+
+        # Combine all features
+        x = torch.cat([grid_flat, state_features], dim=1)  # (batch, 369)
+
+        # Process through MLP
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+
+        # Output action probabilities
+        action_logits = self.action_head(x)
+        action_probs = F.softmax(action_logits, dim=-1)
+
+        return action_probs
+
+    def get_action(self, obs, deterministic=False):
+        """
+        Sample an action from the policy.
+
+        Args:
+            obs: Observation dict
+            deterministic: If True, return argmax action
+        Returns:
+            action: Selected action
+            log_prob: Log probability of the action
+        """
+        action_probs = self.forward(obs)
+
+        if deterministic:
+            action = torch.argmax(action_probs, dim=-1)
+            log_prob = torch.log(action_probs.gather(1, action.unsqueeze(-1)))
+        else:
+            dist = torch.distributions.Categorical(action_probs)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
+
+        return action, log_prob
+
+
+# Default Actor is MLP (more efficient for this task)
+Actor = ActorMLP
 
 
 class Critic(nn.Module):
@@ -205,11 +294,19 @@ if __name__ == "__main__":
         'velocity': torch.randn(batch_size, 2),
     }
 
-    # Test Actor
-    actor = Actor(obs_radius=obs_radius)
-    action_probs = actor(dummy_obs)
-    print(f"Actor output shape: {action_probs.shape}")  # Should be (batch_size, 9)
-    print(f"Action probs sum: {action_probs[0].sum()}")  # Should be ~1.0
+    # Test ActorMLP
+    actor_mlp = ActorMLP(obs_radius=obs_radius)
+    action_probs = actor_mlp(dummy_obs)
+    print(f"ActorMLP output shape: {action_probs.shape}")  # Should be (batch_size, 9)
+    print(f"ActorMLP action probs sum: {action_probs[0].sum()}")  # Should be ~1.0
+    print(f"ActorMLP parameters: {sum(p.numel() for p in actor_mlp.parameters())}")
+
+    # Test ActorCNN
+    actor_cnn = ActorCNN(obs_radius=obs_radius)
+    action_probs = actor_cnn(dummy_obs)
+    print(f"\nActorCNN output shape: {action_probs.shape}")  # Should be (batch_size, 9)
+    print(f"ActorCNN action probs sum: {action_probs[0].sum()}")  # Should be ~1.0
+    print(f"ActorCNN parameters: {sum(p.numel() for p in actor_cnn.parameters())}")
 
     # Test Critic
     critic = Critic(n_agents=n_agents, obs_radius=obs_radius)

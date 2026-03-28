@@ -97,6 +97,8 @@ def main():
                         help='Directory to save visualizations')
     parser.add_argument('--no_animation', action='store_true',
                         help='Skip animation generation (faster)')
+    parser.add_argument('--actor_type', type=str, default='mlp', choices=['mlp', 'cnn'],
+                        help='Actor architecture type: mlp (default, simpler) or cnn (convolutional)')
 
     args = parser.parse_args()
 
@@ -116,6 +118,7 @@ def main():
     if args.device == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"CUDA Version: {torch.version.cuda}")
+    print(f"Actor Type: {args.actor_type.upper()}")
     print(f"{'='*60}\n")
 
     # Step 1: Generate target coordinates using LLM
@@ -160,6 +163,7 @@ def main():
             device=args.device,
             save_dir='models',
             log_interval=10,
+            actor_type=args.actor_type,
         )
 
         print(f"\nStep 4: Running trained policy...")
@@ -195,7 +199,8 @@ def main():
                 args.critic_path,
                 n_agents=args.n_agents,
                 obs_radius=args.obs_radius,
-                device=args.device
+                device=args.device,
+                actor_type=args.actor_type,
             )
             print(f"Models loaded successfully\n")
 
