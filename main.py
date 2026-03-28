@@ -151,7 +151,7 @@ def main():
         print(f"Step 3: Training MAPPO policy...")
         print(f"Training for {args.n_episodes} episodes...\n")
 
-        actor, critic = train_mappo(
+        actor, critic, history = train_mappo(
             env=env,
             n_agents=args.n_agents,
             target_coords=target_coords,
@@ -168,7 +168,15 @@ def main():
         # Visualization
         if args.visualize:
             print(f"\nStep 5: Creating visualizations...")
+
+            # Plot training metrics
+            from environment.visualize import plot_training_metrics
+            print(f"\nGenerating training metrics plots...")
+            plot_training_metrics(history, save_dir=args.vis_dir, show=False)
+
+            # Plot formation visualization
             from environment.visualize import visualize_from_env
+            print(f"\nGenerating formation visualizations...")
             visualize_from_env(
                 env=parallel_env(n_agents=args.n_agents, obs_radius=args.obs_radius),
                 actor=actor,

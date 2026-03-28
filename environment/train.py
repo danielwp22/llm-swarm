@@ -144,10 +144,20 @@ def train_mappo(
     # Create save directory
     os.makedirs(save_dir, exist_ok=True)
 
-    # Training metrics
+    # Training metrics (rolling averages for logging)
     episode_rewards = deque(maxlen=100)
     episode_lengths = deque(maxlen=100)
     episode_collisions = deque(maxlen=100)
+
+    # Full history for visualization
+    history = {
+        'rewards': [],
+        'lengths': [],
+        'collisions': [],
+        'actor_loss': [],
+        'critic_loss': [],
+        'entropy': []
+    }
 
     print(f"Starting MAPPO training for {n_episodes} episodes...")
     print(f"Device: {device}")
@@ -233,6 +243,11 @@ def train_mappo(
         episode_lengths.append(episode_length)
         episode_collisions.append(episode_collision_count)
 
+        # Store in full history
+        history['rewards'].append(episode_reward / n_agents)
+        history['lengths'].append(episode_length)
+        history['collisions'].append(episode_collision_count)
+
         # PPO Update
         total_actor_loss = 0
         total_critic_loss = 0
@@ -295,6 +310,11 @@ def train_mappo(
             # Clear buffer
             buffer.clear()
 
+        # Store losses in history
+        history['actor_loss'].append(total_actor_loss / (n_agents * ppo_epochs) if n_agents * ppo_epochs > 0 else 0)
+        history['critic_loss'].append(total_critic_loss / (n_agents * ppo_epochs) if n_agents * ppo_epochs > 0 else 0)
+        history['entropy'].append(total_entropy / (n_agents * ppo_epochs) if n_agents * ppo_epochs > 0 else 0)
+
         # Logging
         if (episode + 1) % log_interval == 0:
             avg_reward = np.mean(episode_rewards)
@@ -319,7 +339,7 @@ def train_mappo(
     torch.save(critic.state_dict(), os.path.join(save_dir, 'critic_final.pt'))
     print("Training completed! Final models saved.\n")
 
-    return actor, critic
+    return actor, critic, history
 
 
 def load_models(actor_path, critic_path, n_agents, obs_radius=5, device='cpu'):
