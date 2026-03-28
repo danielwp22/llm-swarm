@@ -91,6 +91,12 @@ def main():
                         help='Path to trained critic model')
     parser.add_argument('--no_llm', action='store_true',
                         help='Skip LLM and use default circle formation')
+    parser.add_argument('--visualize', action='store_true',
+                        help='Create visualizations (plots and animations)')
+    parser.add_argument('--vis_dir', type=str, default='visualizations',
+                        help='Directory to save visualizations')
+    parser.add_argument('--no_animation', action='store_true',
+                        help='Skip animation generation (faster)')
 
     args = parser.parse_args()
 
@@ -159,6 +165,19 @@ def main():
         print(f"\nStep 4: Running trained policy...")
         run_trained_policy(env, actor, args.n_agents, target_coords, device=args.device)
 
+        # Visualization
+        if args.visualize:
+            print(f"\nStep 5: Creating visualizations...")
+            from environment.visualize import visualize_from_env
+            visualize_from_env(
+                env=parallel_env(n_agents=args.n_agents, obs_radius=args.obs_radius),
+                actor=actor,
+                target_coords=target_coords,
+                device=args.device,
+                save_dir=args.vis_dir,
+                create_animation=not args.no_animation
+            )
+
     elif args.mode == 'eval':
         # Load and evaluate trained model
         print(f"Step 3: Loading trained models...")
@@ -174,6 +193,19 @@ def main():
 
             print(f"Step 4: Evaluating policy...")
             run_trained_policy(env, actor, args.n_agents, target_coords, device=args.device)
+
+            # Visualization
+            if args.visualize:
+                print(f"\nStep 5: Creating visualizations...")
+                from environment.visualize import visualize_from_env
+                visualize_from_env(
+                    env=parallel_env(n_agents=args.n_agents, obs_radius=args.obs_radius),
+                    actor=actor,
+                    target_coords=target_coords,
+                    device=args.device,
+                    save_dir=args.vis_dir,
+                    create_animation=not args.no_animation
+                )
 
         except Exception as e:
             print(f"Error loading models: {e}")

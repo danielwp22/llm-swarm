@@ -27,6 +27,7 @@ final_project/
 - **Collision Avoidance**: Agents are penalized for collisions with tracking metrics
 - **Formation Rewards**: Bonus rewards for reaching target formation
 - **GPU Acceleration**: Automatic CUDA detection for faster training
+- **Visualization Tools**: Matplotlib-based plotting and GIF animation generation
 
 ## Installation
 
@@ -89,6 +90,11 @@ Skip LLM and use default circle formation:
 python main.py --mode train --no_llm --n_agents 6 --n_episodes 1000
 ```
 
+Train with visualization enabled:
+```bash
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 500 --visualize
+```
+
 ### Evaluation Mode
 
 Evaluate a trained model:
@@ -99,6 +105,11 @@ python main.py --mode eval --shape circle --n_agents 8
 Load from specific checkpoint:
 ```bash
 python main.py --mode eval --actor_path models/actor_ep500.pt --critic_path models/critic_ep500.pt
+```
+
+Evaluate with visualization:
+```bash
+python main.py --mode eval --shape circle --n_agents 8 --visualize
 ```
 
 ### Demo Mode
@@ -122,6 +133,9 @@ python main.py --mode demo --shape triangle --n_agents 6
 - `--actor_path`: Path to actor checkpoint (for eval mode)
 - `--critic_path`: Path to critic checkpoint (for eval mode)
 - `--no_llm`: Skip LLM, use default circle formation
+- `--visualize`: Create visualizations (plots and animations)
+- `--vis_dir`: Directory to save visualizations (default: 'visualizations')
+- `--no_animation`: Skip animation generation (faster, only creates static plots)
 
 ## Environment Details
 
@@ -201,6 +215,51 @@ Models are saved in `models/` directory:
 - Every 100 episodes: `actor_ep{N}.pt`, `critic_ep{N}.pt`
 - Final models: `actor_final.pt`, `critic_final.pt`
 
+## Visualization
+
+The visualization tool creates three types of outputs when `--visualize` is enabled:
+
+### 1. Summary Plot
+Shows initial, middle, and final states side-by-side:
+- Agent trajectories color-coded by agent ID
+- Target positions marked with stars
+- Grid boundaries and collision markers
+
+Saved as: `visualizations/formation_summary.png`
+
+### 2. Final Formation Plot
+Detailed view of the final formation with:
+- Complete agent trajectories
+- Final positions and target positions
+- Distance indicators between agents and targets
+
+Saved as: `visualizations/final_formation.png`
+
+### 3. Animated GIF
+Full trajectory animation showing:
+- Agent movements step-by-step
+- Real-time collision detection
+- Progress indicator
+
+Saved as: `visualizations/formation_animation.gif`
+
+### Usage Examples
+
+**Basic visualization:**
+```bash
+python main.py --mode eval --n_agents 8 --visualize
+```
+
+**Visualization without animation (faster):**
+```bash
+python main.py --mode eval --n_agents 8 --visualize --no_animation
+```
+
+**Custom output directory:**
+```bash
+python main.py --mode train --n_agents 4 --n_episodes 100 --visualize --vis_dir my_results
+```
+
 ## Example Output
 
 ```
@@ -260,6 +319,17 @@ Total reward: 142.56
 Total collisions: 3
 Average reward per agent per step: 0.2046
 Collision rate: 0.03 collisions/step
+
+Step 5: Creating visualizations...
+
+Creating visualizations in visualizations/...
+✓ Summary plot saved: visualizations/formation_summary.png
+✓ Final formation saved: visualizations/final_formation.png
+Saving animation to visualizations/formation_animation.gif...
+Animation saved successfully!
+✓ Animation saved: visualizations/formation_animation.gif
+
+Visualization complete! Files saved in visualizations/
 ```
 
 ## Troubleshooting
@@ -288,11 +358,12 @@ Collision rate: 0.03 collisions/step
 - [ ] Add attention mechanisms in Critic for better scalability
 - [ ] Implement curriculum learning (start with easier formations)
 - [ ] Add communication channels between agents
-- [ ] Visualize agent movements with matplotlib/pygame
+- [x] Visualize agent movements with matplotlib (COMPLETED)
 - [ ] Support for dynamic obstacles
 - [ ] Multi-task learning across different shapes
 - [ ] Add tensorboard logging for collision metrics and training curves
 - [ ] Implement adaptive collision penalty based on training progress
+- [ ] Interactive visualization with real-time agent control
 
 ## References
 
