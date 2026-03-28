@@ -147,6 +147,7 @@ def train_mappo(
     # Training metrics
     episode_rewards = deque(maxlen=100)
     episode_lengths = deque(maxlen=100)
+    episode_collisions = deque(maxlen=100)
 
     print(f"Starting MAPPO training for {n_episodes} episodes...")
     print(f"Device: {device}")
@@ -162,6 +163,7 @@ def train_mappo(
 
         episode_reward = 0
         episode_length = 0
+        episode_collision_count = 0
 
         for step in range(max_steps):
             # Collect actions from all agents
@@ -216,6 +218,9 @@ def train_mappo(
                     buffers[agent].rewards[-1] = rewards[agent]
                     buffers[agent].dones[-1] = terminations[agent] or truncations[agent]
                     episode_reward += rewards[agent]
+                    # Track collisions
+                    if agent in infos and infos[agent].get('collision', False):
+                        episode_collision_count += 1
 
             obs = next_obs
             episode_length += 1
@@ -226,6 +231,7 @@ def train_mappo(
 
         episode_rewards.append(episode_reward / n_agents)  # Average reward per agent
         episode_lengths.append(episode_length)
+        episode_collisions.append(episode_collision_count)
 
         # PPO Update
         total_actor_loss = 0
@@ -293,9 +299,11 @@ def train_mappo(
         if (episode + 1) % log_interval == 0:
             avg_reward = np.mean(episode_rewards)
             avg_length = np.mean(episode_lengths)
+            avg_collisions = np.mean(episode_collisions)
             print(f"Episode {episode + 1}/{n_episodes}")
             print(f"  Avg Reward: {avg_reward:.2f}")
             print(f"  Avg Length: {avg_length:.2f}")
+            print(f"  Avg Collisions: {avg_collisions:.2f}")
             print(f"  Actor Loss: {total_actor_loss / (n_agents * ppo_epochs):.4f}")
             print(f"  Critic Loss: {total_critic_loss / (n_agents * ppo_epochs):.4f}")
             print(f"  Entropy: {total_entropy / (n_agents * ppo_epochs):.4f}\n")

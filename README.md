@@ -24,8 +24,9 @@ final_project/
 - **Local Observations**: Each agent observes a local radius around itself (CTDE principle)
 - **LLM Shape Generation**: Natural language → coordinates via OpenAI API
 - **MAPPO Training**: Multi-Agent Proximal Policy Optimization
-- **Collision Avoidance**: Agents are penalized for collisions
+- **Collision Avoidance**: Agents are penalized for collisions with tracking metrics
 - **Formation Rewards**: Bonus rewards for reaching target formation
+- **GPU Acceleration**: Automatic CUDA detection for faster training
 
 ## Installation
 
@@ -34,23 +35,53 @@ final_project/
 pip install -r requirements.txt
 ```
 
-2. Set up OpenAI API key (for LLM shape generation):
+2. (Optional) For GPU acceleration, install PyTorch with CUDA:
+```bash
+# For CUDA 11.8
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+# For CUDA 12.1
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+3. Set up OpenAI API key (for LLM shape generation):
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
 ```
+
+### GPU Support
+
+The training automatically detects and uses CUDA if available. You'll see output like:
+
+```
+============================================================
+Multi-Agent Formation Control with CTDE
+============================================================
+Device: CUDA
+GPU: NVIDIA GeForce RTX 3090
+CUDA Version: 11.8
+============================================================
+```
+
+GPU training can be 10-50x faster than CPU, especially for larger agent counts.
 
 ## Usage
 
 ### Training Mode
 
-Train agents to form a circle with 8 agents:
+Train agents to form a circle with 8 agents (auto-detects GPU):
 ```bash
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000
 ```
 
-Train on a custom shape:
+Train on a custom shape with explicit GPU usage:
 ```bash
-python main.py --mode train --shape "square" --n_agents 4 --n_episodes 500
+python main.py --mode train --shape "square" --n_agents 4 --n_episodes 500 --device cuda
+```
+
+Train on CPU only:
+```bash
+python main.py --mode train --shape triangle --n_agents 6 --n_episodes 1000 --device cpu
 ```
 
 Skip LLM and use default circle formation:
@@ -84,7 +115,10 @@ python main.py --mode demo --shape triangle --n_agents 6
 - `--shape`: Shape description for LLM (default: 'circle')
 - `--n_episodes`: Training episodes (default: 1000)
 - `--obs_radius`: Local observation radius (default: 5)
-- `--device`: Device to use (`cpu` or `cuda`)
+- `--device`: Device to use (`auto`, `cpu`, or `cuda`; default: 'auto')
+  - `auto`: Automatically detects and uses CUDA if available
+  - `cuda`: Force GPU usage (requires CUDA)
+  - `cpu`: Force CPU usage
 - `--actor_path`: Path to actor checkpoint (for eval mode)
 - `--critic_path`: Path to critic checkpoint (for eval mode)
 - `--no_llm`: Skip LLM, use default circle formation
@@ -144,6 +178,23 @@ Global state (all agents) → MLP (3 layers) → Value estimate
 - Clip epsilon: 0.2
 - Max gradient norm: 0.5
 
+## Training Metrics
+
+The training loop tracks and logs:
+- **Average Reward**: Mean reward per agent over last 100 episodes
+  - Should increase over time (less negative → positive)
+- **Average Episode Length**: Mean number of steps to completion
+  - Should decrease as agents learn more efficient paths
+- **Average Collisions**: Mean collision count per episode
+  - Should decrease over time as agents learn to avoid each other
+  - Well-trained agents typically have <2 collisions per episode
+- **Actor Loss**: Policy gradient loss
+  - Should stabilize after initial training
+- **Critic Loss**: Value function loss
+  - Should decrease and stabilize
+- **Entropy**: Policy entropy (encourages exploration)
+  - Should decrease over time as policy becomes more deterministic
+
 ## Model Checkpoints
 
 Models are saved in `models/` directory:
@@ -155,6 +206,10 @@ Models are saved in `models/` directory:
 ```
 ============================================================
 Multi-Agent Formation Control with CTDE
+============================================================
+Device: CUDA
+GPU: NVIDIA GeForce RTX 4090
+CUDA Version: 12.1
 ============================================================
 
 Step 1: Generating target coordinates for 'circle'...
@@ -175,16 +230,36 @@ Step 2: Creating environment...
 Environment created with 8 agents
 
 Step 3: Training MAPPO policy...
-Training for 1000 episodes...
+Starting MAPPO training for 1000 episodes...
+Device: cuda
+Number of agents: 8
+Target coordinates: [[32, 48], [45, 45], [48, 32], [45, 19], [32, 16], [19, 19], [16, 32], [19, 45]]
 
 Episode 10/1000
   Avg Reward: -12.34
   Avg Length: 245.60
+  Avg Collisions: 8.30
   Actor Loss: 0.0234
   Critic Loss: 0.1245
   Entropy: 2.1234
 
 ...
+
+Models saved at episode 100
+
+Training completed! Final models saved.
+
+============================================================
+Running trained policy...
+============================================================
+
+Success! All agents reached their targets in 87 steps!
+
+Total steps: 87
+Total reward: 142.56
+Total collisions: 3
+Average reward per agent per step: 0.2046
+Collision rate: 0.03 collisions/step
 ```
 
 ## Troubleshooting
@@ -193,9 +268,20 @@ Episode 10/1000
 
 **OpenAI API errors**: Check your API key is set correctly with `echo $OPENAI_API_KEY`
 
-**Out of memory**: Reduce `--n_agents` or use `--device cpu`
+**CUDA out of memory**:
+- Reduce `--n_agents` (fewer agents = less memory)
+- Use `--device cpu` to train on CPU instead
+- Reduce batch size or network hidden dimensions in code
 
-**Training not converging**: Try reducing learning rates or increasing `--n_episodes`
+**CUDA not detected**:
+- Verify installation: `python -c "import torch; print(torch.cuda.is_available())"`
+- Check NVIDIA drivers: `nvidia-smi`
+- Reinstall PyTorch with CUDA support
+
+**Training not converging**:
+- Try reducing learning rates in `train.py`
+- Increase `--n_episodes`
+- Use simpler shapes with fewer agents initially
 
 ## Future Improvements
 
@@ -205,6 +291,8 @@ Episode 10/1000
 - [ ] Visualize agent movements with matplotlib/pygame
 - [ ] Support for dynamic obstacles
 - [ ] Multi-task learning across different shapes
+- [ ] Add tensorboard logging for collision metrics and training curves
+- [ ] Implement adaptive collision penalty based on training progress
 
 ## References
 

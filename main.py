@@ -22,6 +22,7 @@ def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, devic
     obs, info = env.reset(seed=42, target_coords=target_coords)
 
     total_reward = 0
+    total_collisions = 0
     step = 0
 
     print(f"\n{'='*60}")
@@ -43,10 +44,12 @@ def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, devic
         # Step environment
         obs, rewards, terminations, truncations, infos = env.step(actions)
 
-        # Accumulate rewards
+        # Accumulate rewards and track collisions
         for agent in env.agents:
             if agent in rewards:
                 total_reward += rewards[agent]
+            if agent in infos and infos[agent].get('collision', False):
+                total_collisions += 1
 
         step += 1
 
@@ -61,7 +64,9 @@ def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, devic
     avg_reward = total_reward / (n_agents * step) if step > 0 else 0
     print(f"\nTotal steps: {step}")
     print(f"Total reward: {total_reward:.2f}")
+    print(f"Total collisions: {total_collisions}")
     print(f"Average reward per agent per step: {avg_reward:.4f}")
+    print(f"Collision rate: {total_collisions / step:.2f} collisions/step")
 
     env.close()
 
@@ -78,8 +83,8 @@ def main():
                         help='Number of training episodes')
     parser.add_argument('--obs_radius', type=int, default=5,
                         help='Observation radius for agents')
-    parser.add_argument('--device', type=str, default='cpu',
-                        help='Device to use (cpu or cuda)')
+    parser.add_argument('--device', type=str, default='auto',
+                        help='Device to use (cpu, cuda, or auto for automatic detection)')
     parser.add_argument('--actor_path', type=str, default='models/actor_final.pt',
                         help='Path to trained actor model')
     parser.add_argument('--critic_path', type=str, default='models/critic_final.pt',
@@ -89,8 +94,22 @@ def main():
 
     args = parser.parse_args()
 
+    # Auto-detect device
+    if args.device == 'auto':
+        args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # Validate device
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print("Warning: CUDA not available, falling back to CPU")
+        args.device = 'cpu'
+
     print(f"\n{'='*60}")
     print("Multi-Agent Formation Control with CTDE")
+    print(f"{'='*60}")
+    print(f"Device: {args.device.upper()}")
+    if args.device == 'cuda':
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA Version: {torch.version.cuda}")
     print(f"{'='*60}\n")
 
     # Step 1: Generate target coordinates using LLM
