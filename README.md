@@ -70,9 +70,23 @@ GPU training can be 10-50x faster than CPU, especially for larger agent counts.
 
 ### Training Mode
 
-Train agents to form a circle with 8 agents (auto-detects GPU):
+Train agents to form a circle with 8 agents (uses MLP by default, auto-detects GPU):
 ```bash
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000
+```
+
+Train with CNN architecture:
+```bash
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type cnn
+```
+
+Train both architectures for comparison:
+```bash
+# Train MLP
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp --visualize
+
+# Train CNN (won't overwrite MLP models)
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type cnn --visualize
 ```
 
 Train on a custom shape with explicit GPU usage:
@@ -97,19 +111,24 @@ python main.py --mode train --shape circle --n_agents 8 --n_episodes 500 --visua
 
 ### Evaluation Mode
 
-Evaluate a trained model:
+Evaluate a trained MLP model (default):
 ```bash
-python main.py --mode eval --shape circle --n_agents 8
+python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp
+```
+
+Evaluate a trained CNN model:
+```bash
+python main.py --mode eval --shape circle --n_agents 8 --actor_type cnn
 ```
 
 Load from specific checkpoint:
 ```bash
-python main.py --mode eval --actor_path models/actor_ep500.pt --critic_path models/critic_ep500.pt
+python main.py --mode eval --actor_path models/actor_mlp_ep500.pt --critic_path models/critic_mlp_ep500.pt --actor_type mlp
 ```
 
 Evaluate with visualization:
 ```bash
-python main.py --mode eval --shape circle --n_agents 8 --visualize
+python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp --visualize
 ```
 
 ### Demo Mode
@@ -130,8 +149,11 @@ python main.py --mode demo --shape triangle --n_agents 6
   - `auto`: Automatically detects and uses CUDA if available
   - `cuda`: Force GPU usage (requires CUDA)
   - `cpu`: Force CPU usage
-- `--actor_path`: Path to actor checkpoint (for eval mode)
-- `--critic_path`: Path to critic checkpoint (for eval mode)
+- `--actor_type`: Actor architecture (`mlp` or `cnn`; default: 'mlp')
+  - `mlp`: MLP-based actor (simpler, fewer parameters, better for sparse data)
+  - `cnn`: CNN-based actor (more parameters, better for dense visual patterns)
+- `--actor_path`: Path to actor checkpoint (for eval mode; default: `models/actor_{actor_type}_final.pt`)
+- `--critic_path`: Path to critic checkpoint (for eval mode; default: `models/critic_{actor_type}_final.pt`)
 - `--no_llm`: Skip LLM, use default circle formation
 - `--visualize`: Create visualizations (plots and animations)
 - `--vis_dir`: Directory to save visualizations (default: 'visualizations')
@@ -170,17 +192,38 @@ reward = -distance_to_target        # Main objective
 
 ## Neural Network Architecture
 
-### Actor (Decentralized)
+The project supports two Actor architectures that can be selected with `--actor_type`:
+
+### ActorMLP (Default, Recommended)
+```
+Flatten local grid (11×11×3 = 363) → Concatenate with state features (6)
+→ FC layers (256 → 256 → 128) → Action probabilities (9 actions)
+
+Parameters: ~231K
+Best for: Sparse symbolic observations (this task)
+```
+
+### ActorCNN (Alternative)
 ```
 CNN (3 layers) → Process local grid
 MLP → Process state features (position, target, velocity)
 Concatenate → FC layers → Action probabilities (9 actions)
+
+Parameters: ~587K
+Best for: Dense visual patterns
 ```
 
 ### Critic (Centralized)
 ```
 Global state (all agents) → MLP (3 layers) → Value estimate
+
+Parameters: ~133K
 ```
+
+**Architecture Selection:**
+- **MLP** is the default and recommended for this task (60% fewer parameters)
+- **CNN** available for comparison or if using dense visual observations
+- Both architectures can coexist in the same `models/` directory
 
 ## Training Hyperparameters
 
@@ -211,9 +254,32 @@ The training loop tracks and logs:
 
 ## Model Checkpoints
 
-Models are saved in `models/` directory:
-- Every 100 episodes: `actor_ep{N}.pt`, `critic_ep{N}.pt`
-- Final models: `actor_final.pt`, `critic_final.pt`
+Models are saved in `models/` directory with architecture-specific naming:
+- Every 100 episodes: `actor_{actor_type}_ep{N}.pt`, `critic_{actor_type}_ep{N}.pt`
+- Final models: `actor_{actor_type}_final.pt`, `critic_{actor_type}_final.pt`
+
+**Examples:**
+- MLP: `actor_mlp_final.pt`, `actor_mlp_ep100.pt`, `actor_mlp_ep200.pt`
+- CNN: `actor_cnn_final.pt`, `actor_cnn_ep100.pt`, `actor_cnn_ep200.pt`
+
+This allows training and storing both architectures without conflicts.
+
+### Comparing Architectures
+
+To empirically compare MLP vs CNN performance:
+
+```bash
+# Train both with same settings
+python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/mlp
+python main.py --mode train --actor_type cnn --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/cnn
+
+# Compare the training_rewards_collisions.png plots in both directories
+```
+
+**Expected Results:**
+- **MLP**: Faster training (fewer parameters), comparable or better final performance
+- **CNN**: Slower training (more parameters), may overfit on sparse data
+- **For this task**: MLP is recommended due to sparse symbolic observations
 
 ## Visualization
 
@@ -297,6 +363,152 @@ python main.py --mode train --n_agents 4 --n_episodes 100 --visualize --vis_dir 
 **Episode Length**: Should decrease as agents find more direct routes to their targets.
 
 **Losses & Entropy**: Actor/Critic losses should stabilize, while entropy decreases as the policy becomes more deterministic.
+
+---
+
+## Raspberry Pi RGB LED Display
+
+The project includes an interactive voice-controlled visualizer for Raspberry Pi 5 with a 64x64 RGB LED matrix display.
+
+### Hardware Requirements
+
+- Raspberry Pi 5
+- 64x64 RGB LED Matrix Panel
+- Adafruit RGB Matrix Bonnet
+- USB Microphone for voice input
+- Speaker (optional, for audio feedback)
+
+### Installation on Raspberry Pi
+
+```bash
+# Install Python dependencies
+pip3 install torch numpy pillow vosk
+pip3 install adafruit_blinka_raspberry_pi5_piomatter
+
+# Download Vosk speech recognition model
+cd /path/to/llm_swarm
+wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+unzip vosk-model-small-en-us-0.15.zip
+```
+
+### Usage
+
+#### Basic Usage (with voice prompts)
+```bash
+cd /path/to/llm_swarm
+python3 pi/interactive_display.py
+```
+
+The script will:
+1. Ask you to say a shape name (circle, square, triangle, etc.)
+2. Confirm what it heard with yes/no
+3. Use default 8 agents (configurable in script)
+4. Generate coordinates via LLM
+5. Display real-time formation on RGB matrix
+
+#### Configuration
+
+Edit `pi/interactive_display.py` to customize:
+
+```python
+# Configuration at top of file
+ACTOR_MODEL_PATH = "models/actor_mlp_final.pt"  # Model to use
+ACTOR_TYPE = "mlp"  # "mlp" or "cnn"
+WIDTH = 64
+HEIGHT = 64
+STEP_DELAY = 0.1  # Seconds between animation frames
+DEFAULT_N_AGENTS = 8  # Default number of agents
+SKIP_AGENT_PROMPT = True  # Set to False to always ask for agent count
+```
+
+**To enable agent count prompts:**
+```python
+SKIP_AGENT_PROMPT = False  # Will ask for agent count via voice
+```
+
+**To change default agent count:**
+```python
+DEFAULT_N_AGENTS = 4  # Use 4 agents instead of 8
+```
+
+### Display Features
+
+- **Agent Visualization**: Each agent is a 2×2 bright colored square (10 distinct colors)
+- **Target Markers**: Dim gray pixels show formation target positions
+- **Motion Trails**: 10-step fading trail follows each agent
+- **Real-time Updates**: 10 FPS animation (0.1s between steps)
+- **Formation Complete**: Display freezes when all agents reach targets
+
+### Color Palette
+
+| Agent | Color   | RGB Value     |
+|-------|---------|---------------|
+| 0     | Red     | (255, 0, 0)   |
+| 1     | Green   | (0, 255, 0)   |
+| 2     | Blue    | (0, 0, 255)   |
+| 3     | Yellow  | (255, 255, 0) |
+| 4     | Magenta | (255, 0, 255) |
+| 5     | Cyan    | (0, 255, 255) |
+| 6     | Orange  | (255, 128, 0) |
+| 7     | Purple  | (128, 0, 255) |
+| 8     | White   | (255, 255, 255) |
+| 9     | Lime    | (128, 255, 0) |
+
+### Voice Commands
+
+**Shape Selection:**
+- Say: "circle", "square", "triangle", "line", "star", etc.
+- Confirm with: "yes" or "no"
+
+**Agent Count** (if SKIP_AGENT_PROMPT = False):
+- Say number as digit: "4", "8", "12"
+- Or say word: "four", "eight", "twelve"
+- Confirm with: "yes" or "no"
+
+### Troubleshooting
+
+**Vosk model not found:**
+```bash
+# Download the model in your llm_swarm directory
+cd /path/to/llm_swarm
+wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+unzip vosk-model-small-en-us-0.15.zip
+```
+
+**Audio device errors:**
+```bash
+# List audio devices
+arecord -l
+
+# Update device in script if needed (currently: plughw:2,0)
+```
+
+**Model not found:**
+Train a model first on your main machine, then copy to Pi:
+```bash
+# On main machine
+python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000
+
+# Copy to Raspberry Pi
+scp models/actor_mlp_final.pt pi@raspberrypi:/path/to/llm_swarm/models/
+```
+
+**LED matrix not displaying:**
+- Check power supply (5V, 4A+ recommended for 64x64 matrix)
+- Verify Adafruit RGB Matrix Bonnet connection
+- Check jumper settings on bonnet
+
+### Demo Mode
+
+For demonstrations, configure for minimal interaction:
+```python
+SKIP_AGENT_PROMPT = True
+DEFAULT_N_AGENTS = 8
+```
+
+This allows quick shape selection without confirming agent count each time.
+
+---
 
 ## Example Output
 

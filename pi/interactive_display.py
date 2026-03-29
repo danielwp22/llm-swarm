@@ -32,6 +32,8 @@ ACTOR_TYPE = "mlp"  # Set to "cnn" if using CNN model
 WIDTH = 64
 HEIGHT = 64
 STEP_DELAY = 0.1  # Seconds between steps
+DEFAULT_N_AGENTS = 8  # Set to a number to skip agent count prompt, or None to always ask
+SKIP_AGENT_PROMPT = True  # Set to True to use DEFAULT_N_AGENTS without confirmation
 
 
 # Color palette for agents (distinct colors)
@@ -329,36 +331,42 @@ def main():
             print("Let's try again\n")
 
     # Step 2: Get number of agents
-    n_agents = None
-    while n_agents is None:
-        print("How many agents? (say a number)")
-        print("Listening...")
+    if SKIP_AGENT_PROMPT and DEFAULT_N_AGENTS is not None:
+        # Use default without prompting
+        n_agents = DEFAULT_N_AGENTS
+        print(f"Using {n_agents} agents (default)\n")
+    else:
+        # Interactive prompt for agent count
+        n_agents = None
+        while n_agents is None:
+            print("How many agents? (say a number)")
+            print("Listening...")
 
-        number_text = listen_once(recognizer)
-        if not number_text:
-            print("Didn't hear anything, please try again\n")
-            continue
+            number_text = listen_once(recognizer)
+            if not number_text:
+                print("Didn't hear anything, please try again\n")
+                continue
 
-        n_agents = extract_number(number_text)
-        if n_agents is None:
-            print(f"Couldn't understand number from: '{number_text}'")
-            print("Please try again\n")
-            continue
+            n_agents = extract_number(number_text)
+            if n_agents is None:
+                print(f"Couldn't understand number from: '{number_text}'")
+                print("Please try again\n")
+                continue
 
-        # Limit to reasonable number for display
-        if n_agents < 2 or n_agents > 20:
-            print(f"Number must be between 2 and 20 (heard: {n_agents})")
-            n_agents = None
-            continue
+            # Limit to reasonable number for display
+            if n_agents < 2 or n_agents > 20:
+                print(f"Number must be between 2 and 20 (heard: {n_agents})")
+                n_agents = None
+                continue
 
-        print(f"Heard: {n_agents} agents")
-        print("Is this correct? (yes/no)")
+            print(f"Heard: {n_agents} agents")
+            print("Is this correct? (yes/no)")
 
-        if get_yes_no(recognizer):
-            print(f"✓ Number of agents confirmed: {n_agents}\n")
-        else:
-            n_agents = None
-            print("Let's try again\n")
+            if get_yes_no(recognizer):
+                print(f"✓ Number of agents confirmed: {n_agents}\n")
+            else:
+                n_agents = None
+                print("Let's try again\n")
 
     # Step 3: Generate target coordinates
     print(f"Generating target coordinates for '{shape}' with {n_agents} agents...")
