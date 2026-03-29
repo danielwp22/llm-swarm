@@ -375,17 +375,20 @@ The project includes an interactive voice-controlled visualizer for Raspberry Pi
 - Raspberry Pi 5
 - 64x64 RGB LED Matrix Panel
 - Adafruit RGB Matrix Bonnet
-- USB Microphone for voice input
+- USB Microphone for voice input (optional, not needed with `--text-input`)
 - Speaker (optional, for audio feedback)
 
 ### Installation on Raspberry Pi
 
 ```bash
-# Install Python dependencies
-pip3 install torch numpy pillow vosk
+# Install core Python dependencies
+pip3 install torch numpy pillow
 pip3 install adafruit_blinka_raspberry_pi5_piomatter
 
-# Download Vosk speech recognition model
+# Install vosk for voice control (optional, skip if using --text-input)
+pip3 install vosk
+
+# Download Vosk speech recognition model (only needed for voice control)
 cd /path/to/llm_swarm
 wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
 unzip vosk-model-small-en-us-0.15.zip
@@ -393,7 +396,7 @@ unzip vosk-model-small-en-us-0.15.zip
 
 ### Usage
 
-#### Basic Usage (with voice prompts)
+#### Basic Usage (with voice control)
 ```bash
 cd /path/to/llm_swarm
 python3 pi/interactive_display.py
@@ -405,6 +408,18 @@ The script will:
 3. Use default 8 agents (configurable in script)
 4. Generate coordinates via LLM
 5. Display real-time formation on RGB matrix
+
+#### Text Input Mode (without voice recognition)
+```bash
+cd /path/to/llm_swarm
+python3 pi/interactive_display.py --text-input
+```
+
+Use this mode if:
+- You don't have a microphone available
+- Vosk speech recognition isn't installed
+- You prefer typing instead of speaking
+- You're testing the script without audio hardware
 
 #### Configuration
 
@@ -467,6 +482,12 @@ DEFAULT_N_AGENTS = 4  # Use 4 agents instead of 8
 
 ### Troubleshooting
 
+**Vosk not installed or no microphone:**
+```bash
+# Use text input mode instead
+python3 pi/interactive_display.py --text-input
+```
+
 **Vosk model not found:**
 ```bash
 # Download the model in your llm_swarm directory
@@ -481,6 +502,9 @@ unzip vosk-model-small-en-us-0.15.zip
 arecord -l
 
 # Update device in script if needed (currently: plughw:2,0)
+
+# Or use text input mode as an alternative
+python3 pi/interactive_display.py --text-input
 ```
 
 **Model not found:**
