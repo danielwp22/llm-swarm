@@ -70,23 +70,23 @@ GPU training can be 10-50x faster than CPU, especially for larger agent counts.
 
 ### Training Mode
 
-Train agents to form a circle with 8 agents (uses MLP by default, auto-detects GPU):
+Train agents to form a circle with 8 agents (uses CNN by default, auto-detects GPU):
 ```bash
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000
 ```
 
-Train with CNN architecture:
+Train with MLP architecture:
 ```bash
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type cnn
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp
 ```
 
 Train both architectures for comparison:
 ```bash
-# Train MLP
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp --visualize
-
-# Train CNN (won't overwrite MLP models)
+# Train CNN
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type cnn --visualize
+
+# Train MLP (won't overwrite CNN models)
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp --visualize
 ```
 
 Train on a custom shape with explicit GPU usage:
@@ -111,14 +111,14 @@ python main.py --mode train --shape circle --n_agents 8 --n_episodes 500 --visua
 
 ### Evaluation Mode
 
-Evaluate a trained MLP model (default):
+Evaluate a trained CNN model (default):
 ```bash
-python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp
+python main.py --mode eval --shape circle --n_agents 8
 ```
 
-Evaluate a trained CNN model:
+Evaluate a trained MLP model:
 ```bash
-python main.py --mode eval --shape circle --n_agents 8 --actor_type cnn
+python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp
 ```
 
 Load from specific checkpoint:
@@ -128,7 +128,7 @@ python main.py --mode eval --actor_path models/actor_mlp_ep500.pt --critic_path 
 
 Evaluate with visualization:
 ```bash
-python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp --visualize
+python main.py --mode eval --shape circle --n_agents 8 --visualize
 ```
 
 ### Demo Mode
@@ -149,9 +149,9 @@ python main.py --mode demo --shape triangle --n_agents 6
   - `auto`: Automatically detects and uses CUDA if available
   - `cuda`: Force GPU usage (requires CUDA)
   - `cpu`: Force CPU usage
-- `--actor_type`: Actor architecture (`mlp` or `cnn`; default: 'mlp')
+- `--actor_type`: Actor architecture (`mlp` or `cnn`; default: 'cnn')
+  - `cnn`: CNN-based actor (convolutional, more parameters, better for dense visual patterns)
   - `mlp`: MLP-based actor (simpler, fewer parameters, better for sparse data)
-  - `cnn`: CNN-based actor (more parameters, better for dense visual patterns)
 - `--actor_path`: Path to actor checkpoint (for eval mode; default: `models/actor_{actor_type}_final.pt`)
 - `--critic_path`: Path to critic checkpoint (for eval mode; default: `models/critic_{actor_type}_final.pt`)
 - `--no_llm`: Skip LLM, use default circle formation
@@ -194,16 +194,7 @@ reward = -distance_to_target        # Main objective
 
 The project supports two Actor architectures that can be selected with `--actor_type`:
 
-### ActorMLP (Default, Recommended)
-```
-Flatten local grid (11×11×3 = 363) → Concatenate with state features (6)
-→ FC layers (256 → 256 → 128) → Action probabilities (9 actions)
-
-Parameters: ~231K
-Best for: Sparse symbolic observations (this task)
-```
-
-### ActorCNN (Alternative)
+### ActorCNN (Default)
 ```
 CNN (3 layers) → Process local grid
 MLP → Process state features (position, target, velocity)
@@ -211,6 +202,15 @@ Concatenate → FC layers → Action probabilities (9 actions)
 
 Parameters: ~587K
 Best for: Dense visual patterns
+```
+
+### ActorMLP (Alternative)
+```
+Flatten local grid (11×11×3 = 363) → Concatenate with state features (6)
+→ FC layers (256 → 256 → 128) → Action probabilities (9 actions)
+
+Parameters: ~231K
+Best for: Sparse symbolic observations (60% fewer parameters)
 ```
 
 ### Critic (Centralized)
@@ -221,8 +221,8 @@ Parameters: ~133K
 ```
 
 **Architecture Selection:**
-- **MLP** is the default and recommended for this task (60% fewer parameters)
-- **CNN** available for comparison or if using dense visual observations
+- **CNN** is the default (better for visual patterns)
+- **MLP** is available as a lighter alternative (60% fewer parameters)
 - Both architectures can coexist in the same `models/` directory
 
 ## Training Hyperparameters
@@ -259,27 +259,26 @@ Models are saved in `models/` directory with architecture-specific naming:
 - Final models: `actor_{actor_type}_final.pt`, `critic_{actor_type}_final.pt`
 
 **Examples:**
-- MLP: `actor_mlp_final.pt`, `actor_mlp_ep100.pt`, `actor_mlp_ep200.pt`
 - CNN: `actor_cnn_final.pt`, `actor_cnn_ep100.pt`, `actor_cnn_ep200.pt`
+- MLP: `actor_mlp_final.pt`, `actor_mlp_ep100.pt`, `actor_mlp_ep200.pt`
 
 This allows training and storing both architectures without conflicts.
 
 ### Comparing Architectures
 
-To empirically compare MLP vs CNN performance:
+To empirically compare CNN vs MLP performance:
 
 ```bash
 # Train both with same settings
-python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/mlp
 python main.py --mode train --actor_type cnn --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/cnn
+python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/mlp
 
 # Compare the training_rewards_collisions.png plots in both directories
 ```
 
 **Expected Results:**
-- **MLP**: Faster training (fewer parameters), comparable or better final performance
-- **CNN**: Slower training (more parameters), may overfit on sparse data
-- **For this task**: MLP is recommended due to sparse symbolic observations
+- **CNN**: Default architecture, better for visual patterns, more parameters (~587K)
+- **MLP**: Faster training (fewer parameters ~231K), more efficient for sparse observations
 
 ## Visualization
 
@@ -427,8 +426,8 @@ Edit `pi/interactive_display.py` to customize:
 
 ```python
 # Configuration at top of file
-ACTOR_MODEL_PATH = "models/actor_mlp_final.pt"  # Model to use
-ACTOR_TYPE = "mlp"  # "mlp" or "cnn"
+ACTOR_MODEL_PATH = "models/actor_cnn_final.pt"  # Model to use
+ACTOR_TYPE = "cnn"  # "cnn" or "mlp"
 WIDTH = 64
 HEIGHT = 64
 STEP_DELAY = 0.1  # Seconds between animation frames
@@ -510,10 +509,14 @@ python3 pi/interactive_display.py --text-input
 **Model not found:**
 Train a model first on your main machine, then copy to Pi:
 ```bash
-# On main machine
-python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000
+# On main machine (default CNN)
+python main.py --mode train --n_agents 8 --n_episodes 1000
 
 # Copy to Raspberry Pi
+scp models/actor_cnn_final.pt pi@raspberrypi:/path/to/llm_swarm/models/
+
+# Or train with MLP if you prefer
+python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000
 scp models/actor_mlp_final.pt pi@raspberrypi:/path/to/llm_swarm/models/
 ```
 

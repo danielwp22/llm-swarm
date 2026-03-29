@@ -37,8 +37,8 @@ from llm.shape_gen import gen_shape, generate_default_circle
 
 # Configuration
 VOSK_MODEL_PATH = "vosk-model-small-en-us-0.15"
-ACTOR_MODEL_PATH = "models/actor_mlp_final.pt"  # Using MLP (default architecture)
-ACTOR_TYPE = "mlp"  # Set to "cnn" if using CNN model
+ACTOR_MODEL_PATH = "models/actor_cnn_final.pt"  # Using CNN (default architecture)
+ACTOR_TYPE = "cnn"  # Set to "mlp" if using MLP model
 WIDTH = 64
 HEIGHT = 64
 STEP_DELAY = 0.1  # Seconds between steps
