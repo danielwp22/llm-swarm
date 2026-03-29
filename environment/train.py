@@ -347,14 +347,14 @@ def train_mappo(
 
         # Save models periodically
         if (episode + 1) % 100 == 0:
-            torch.save(actor.state_dict(), os.path.join(save_dir, f'actor_ep{episode+1}.pt'))
-            torch.save(critic.state_dict(), os.path.join(save_dir, f'critic_ep{episode+1}.pt'))
+            torch.save(actor.state_dict(), os.path.join(save_dir, f'actor_{actor_type}_ep{episode+1}.pt'))
+            torch.save(critic.state_dict(), os.path.join(save_dir, f'critic_{actor_type}_ep{episode+1}.pt'))
             print(f"Models saved at episode {episode + 1}\n")
 
     # Save final models
-    torch.save(actor.state_dict(), os.path.join(save_dir, 'actor_final.pt'))
-    torch.save(critic.state_dict(), os.path.join(save_dir, 'critic_final.pt'))
-    print("Training completed! Final models saved.\n")
+    torch.save(actor.state_dict(), os.path.join(save_dir, f'actor_{actor_type}_final.pt'))
+    torch.save(critic.state_dict(), os.path.join(save_dir, f'critic_{actor_type}_final.pt'))
+    print(f"Training completed! Final models saved to actor_{actor_type}_final.pt and critic_{actor_type}_final.pt\n")
 
     return actor, critic, history
 
