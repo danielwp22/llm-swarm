@@ -31,7 +31,7 @@ except ImportError:
 import adafruit_blinka_raspberry_pi5_piomatter as piomatter
 
 from environment.grid_env import parallel_env
-from environment.model import Actor, dict_obs_to_tensor
+from environment.model import ActorCNN, ActorMLP, dict_obs_to_tensor
 from llm.shape_gen import gen_shape, generate_default_circle
 
 
@@ -444,7 +444,11 @@ def main():
         print("Please train a model first using: python main.py --mode train")
         return
 
-    actor = Actor(obs_radius=5).to('cpu')
+    # Select the correct actor class based on ACTOR_TYPE
+    ActorClass = ActorCNN if ACTOR_TYPE.lower() == "cnn" else ActorMLP
+    print(f"Using {ACTOR_TYPE.upper()} architecture")
+
+    actor = ActorClass(obs_radius=5).to('cpu')
     actor.load_state_dict(torch.load(ACTOR_MODEL_PATH, map_location='cpu'))
     actor.eval()
     print("✓ Model loaded\n")

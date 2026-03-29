@@ -105,7 +105,7 @@ def train_mappo(
     device='cpu',
     save_dir='models',
     log_interval=10,
-    actor_type='mlp',
+    actor_type='cnn',
 ):
     """
     Train multi-agent policy using MAPPO (Multi-Agent PPO).
@@ -359,7 +359,7 @@ def train_mappo(
     return actor, critic, history
 
 
-def load_models(actor_path, critic_path, n_agents, obs_radius=5, device='cpu', actor_type='mlp'):
+def load_models(actor_path, critic_path, n_agents, obs_radius=5, device='cpu', actor_type='cnn'):
     """
     Load trained models from checkpoint.
 
