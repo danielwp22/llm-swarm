@@ -85,10 +85,10 @@ def main():
                         help='Observation radius for agents')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device to use (cpu, cuda, or auto for automatic detection)')
-    parser.add_argument('--actor_path', type=str, default='models/actor_final.pt',
-                        help='Path to trained actor model')
-    parser.add_argument('--critic_path', type=str, default='models/critic_final.pt',
-                        help='Path to trained critic model')
+    parser.add_argument('--actor_path', type=str, default=None,
+                        help='Path to trained actor model (default: models/actor_{actor_type}_final.pt)')
+    parser.add_argument('--critic_path', type=str, default=None,
+                        help='Path to trained critic model (default: models/critic_{actor_type}_final.pt)')
     parser.add_argument('--no_llm', action='store_true',
                         help='Skip LLM and use default circle formation')
     parser.add_argument('--visualize', action='store_true',
@@ -97,6 +97,8 @@ def main():
                         help='Directory to save visualizations')
     parser.add_argument('--no_animation', action='store_true',
                         help='Skip animation generation (faster)')
+    parser.add_argument('--actor_type', type=str, default='mlp', choices=['mlp', 'cnn'],
+                        help='Actor architecture type: mlp (default, simpler) or cnn (convolutional)')
 
     args = parser.parse_args()
 
@@ -116,6 +118,7 @@ def main():
     if args.device == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"CUDA Version: {torch.version.cuda}")
+    print(f"Actor Type: {args.actor_type.upper()}")
     print(f"{'='*60}\n")
 
     # Step 1: Generate target coordinates using LLM
@@ -160,6 +163,7 @@ def main():
             device=args.device,
             save_dir='models',
             log_interval=10,
+            actor_type=args.actor_type,
         )
 
         print(f"\nStep 4: Running trained policy...")
@@ -189,13 +193,19 @@ def main():
     elif args.mode == 'eval':
         # Load and evaluate trained model
         print(f"Step 3: Loading trained models...")
+
+        # Use architecture-specific default paths if not provided
+        actor_path = args.actor_path if args.actor_path else f'models/actor_{args.actor_type}_final.pt'
+        critic_path = args.critic_path if args.critic_path else f'models/critic_{args.actor_type}_final.pt'
+
         try:
             actor, critic = load_models(
-                args.actor_path,
-                args.critic_path,
+                actor_path,
+                critic_path,
                 n_agents=args.n_agents,
                 obs_radius=args.obs_radius,
-                device=args.device
+                device=args.device,
+                actor_type=args.actor_type,
             )
             print(f"Models loaded successfully\n")
 
