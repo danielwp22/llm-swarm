@@ -36,9 +36,11 @@ MANIFEST
 *.pt
 *.pth
 *.ckpt
-# But keep final models
+# But keep final models and every thousandth checkpoint
 !models/*final.pt
 !models/*final.pth
+!*000.pt
+!*000.pth
 
 # Jupyter Notebook
 .ipynb_checkpoints
