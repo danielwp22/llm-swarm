@@ -217,9 +217,32 @@ Models are saved in `models/` directory:
 
 ## Visualization
 
-The visualization tool creates three types of outputs when `--visualize` is enabled:
+The visualization tool creates **five types of outputs** when `--visualize` is enabled:
 
-### 1. Summary Plot
+### Training Metrics Plots (Generated After Training)
+
+#### 1. Comprehensive Metrics Dashboard
+6-panel visualization showing all training metrics:
+- **Episode Rewards**: Average reward per agent over time
+- **Collision Count**: Total collisions per episode
+- **Episode Duration**: Number of steps to completion
+- **Actor Loss**: Policy gradient loss
+- **Critic Loss**: Value function loss
+- **Policy Entropy**: Exploration metric
+
+Saved as: `visualizations/training_metrics.png`
+
+#### 2. Key Metrics Focus
+2-panel plot emphasizing rewards and collisions:
+- Raw values with semi-transparent lines
+- Moving average smoothing (automatically scaled window)
+- Clear trend visualization
+
+Saved as: `visualizations/training_rewards_collisions.png`
+
+### Formation Visualization Plots
+
+#### 3. Summary Plot
 Shows initial, middle, and final states side-by-side:
 - Agent trajectories color-coded by agent ID
 - Target positions marked with stars
@@ -227,7 +250,7 @@ Shows initial, middle, and final states side-by-side:
 
 Saved as: `visualizations/formation_summary.png`
 
-### 2. Final Formation Plot
+#### 4. Final Formation Plot
 Detailed view of the final formation with:
 - Complete agent trajectories
 - Final positions and target positions
@@ -235,7 +258,7 @@ Detailed view of the final formation with:
 
 Saved as: `visualizations/final_formation.png`
 
-### 3. Animated GIF
+#### 5. Animated GIF
 Full trajectory animation showing:
 - Agent movements step-by-step
 - Real-time collision detection
@@ -245,20 +268,35 @@ Saved as: `visualizations/formation_animation.gif`
 
 ### Usage Examples
 
-**Basic visualization:**
+**Train with full visualization (training metrics + formation):**
 ```bash
-python main.py --mode eval --n_agents 8 --visualize
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 500 --visualize
 ```
 
-**Visualization without animation (faster):**
+**Train with visualization but skip animation (faster):**
 ```bash
-python main.py --mode eval --n_agents 8 --visualize --no_animation
+python main.py --mode train --n_agents 4 --n_episodes 100 --visualize --no_animation
+```
+
+**Evaluate existing model (formation visualization only):**
+```bash
+python main.py --mode eval --n_agents 8 --visualize
 ```
 
 **Custom output directory:**
 ```bash
 python main.py --mode train --n_agents 4 --n_episodes 100 --visualize --vis_dir my_results
 ```
+
+### Understanding Training Metrics
+
+**Rewards**: Should trend upward from negative to positive values as agents learn efficient paths to their targets.
+
+**Collisions**: Should decrease over time, indicating improved coordination and collision avoidance. Well-trained agents typically achieve <2 collisions per episode.
+
+**Episode Length**: Should decrease as agents find more direct routes to their targets.
+
+**Losses & Entropy**: Actor/Critic losses should stabilize, while entropy decreases as the policy becomes more deterministic.
 
 ## Example Output
 
@@ -321,6 +359,12 @@ Average reward per agent per step: 0.2046
 Collision rate: 0.03 collisions/step
 
 Step 5: Creating visualizations...
+
+Generating training metrics plots...
+✓ Training metrics plot saved: visualizations/training_metrics.png
+✓ Key metrics plot saved: visualizations/training_rewards_collisions.png
+
+Generating formation visualizations...
 
 Creating visualizations in visualizations/...
 ✓ Summary plot saved: visualizations/formation_summary.png

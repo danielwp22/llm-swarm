@@ -385,3 +385,134 @@ def visualize_from_env(env, actor, target_coords, n_steps=500, device='cpu',
     print(f"\nVisualization complete! Files saved in {save_dir}/")
 
     return vis
+
+
+def plot_training_metrics(history, save_dir='visualizations', show=False):
+    """
+    Plot training metrics over time.
+
+    Args:
+        history: Dict containing training metrics
+            - 'rewards': List of episode rewards
+            - 'collisions': List of episode collisions
+            - 'lengths': List of episode lengths
+            - 'actor_loss': List of actor losses
+            - 'critic_loss': List of critic losses
+            - 'entropy': List of entropy values
+        save_dir: Directory to save plots
+        show: Whether to display plots
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    episodes = range(1, len(history['rewards']) + 1)
+
+    # Create figure with 6 subplots (2 rows, 3 columns)
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig.suptitle('Training Metrics Over Time', fontsize=16, fontweight='bold')
+
+    # Flatten axes for easier iteration
+    axes = axes.flatten()
+
+    # 1. Rewards
+    axes[0].plot(episodes, history['rewards'], linewidth=2, color='#2ecc71')
+    axes[0].set_xlabel('Episode', fontsize=11)
+    axes[0].set_ylabel('Average Reward per Agent', fontsize=11)
+    axes[0].set_title('Episode Rewards', fontweight='bold')
+    axes[0].grid(True, alpha=0.3)
+    axes[0].axhline(y=0, color='r', linestyle='--', alpha=0.5, linewidth=1)
+
+    # 2. Collisions
+    axes[1].plot(episodes, history['collisions'], linewidth=2, color='#e74c3c')
+    axes[1].set_xlabel('Episode', fontsize=11)
+    axes[1].set_ylabel('Total Collisions', fontsize=11)
+    axes[1].set_title('Collision Count', fontweight='bold')
+    axes[1].grid(True, alpha=0.3)
+
+    # 3. Episode Lengths
+    axes[2].plot(episodes, history['lengths'], linewidth=2, color='#3498db')
+    axes[2].set_xlabel('Episode', fontsize=11)
+    axes[2].set_ylabel('Episode Length (steps)', fontsize=11)
+    axes[2].set_title('Episode Duration', fontweight='bold')
+    axes[2].grid(True, alpha=0.3)
+
+    # 4. Actor Loss
+    axes[3].plot(episodes, history['actor_loss'], linewidth=2, color='#9b59b6')
+    axes[3].set_xlabel('Episode', fontsize=11)
+    axes[3].set_ylabel('Actor Loss', fontsize=11)
+    axes[3].set_title('Actor Policy Loss', fontweight='bold')
+    axes[3].grid(True, alpha=0.3)
+
+    # 5. Critic Loss
+    axes[4].plot(episodes, history['critic_loss'], linewidth=2, color='#f39c12')
+    axes[4].set_xlabel('Episode', fontsize=11)
+    axes[4].set_ylabel('Critic Loss', fontsize=11)
+    axes[4].set_title('Critic Value Loss', fontweight='bold')
+    axes[4].grid(True, alpha=0.3)
+
+    # 6. Entropy
+    axes[5].plot(episodes, history['entropy'], linewidth=2, color='#1abc9c')
+    axes[5].set_xlabel('Episode', fontsize=11)
+    axes[5].set_ylabel('Entropy', fontsize=11)
+    axes[5].set_title('Policy Entropy', fontweight='bold')
+    axes[5].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    # Save full metrics plot
+    metrics_path = os.path.join(save_dir, 'training_metrics.png')
+    plt.savefig(metrics_path, dpi=150, bbox_inches='tight')
+    print(f"✓ Training metrics plot saved: {metrics_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    # Create a separate plot focusing on rewards and collisions
+    fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig2.suptitle('Key Training Metrics: Rewards & Collisions', fontsize=14, fontweight='bold')
+
+    # Rewards with moving average
+    window = min(50, len(history['rewards']) // 10)
+    if window > 1:
+        moving_avg_rewards = np.convolve(history['rewards'], np.ones(window)/window, mode='valid')
+        moving_avg_episodes = list(range(window, len(history['rewards']) + 1))
+        ax1.plot(episodes, history['rewards'], alpha=0.3, color='#2ecc71', label='Raw')
+        ax1.plot(moving_avg_episodes, moving_avg_rewards, linewidth=2, color='#27ae60', label=f'{window}-Episode MA')
+        ax1.legend()
+    else:
+        ax1.plot(episodes, history['rewards'], linewidth=2, color='#2ecc71')
+
+    ax1.set_xlabel('Episode', fontsize=12)
+    ax1.set_ylabel('Average Reward per Agent', fontsize=12)
+    ax1.set_title('Reward Progress', fontweight='bold', fontsize=13)
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(y=0, color='r', linestyle='--', alpha=0.5, linewidth=1, label='Zero Reward')
+
+    # Collisions with moving average
+    if window > 1:
+        moving_avg_collisions = np.convolve(history['collisions'], np.ones(window)/window, mode='valid')
+        ax2.plot(episodes, history['collisions'], alpha=0.3, color='#e74c3c', label='Raw')
+        ax2.plot(moving_avg_episodes, moving_avg_collisions, linewidth=2, color='#c0392b', label=f'{window}-Episode MA')
+        ax2.legend()
+    else:
+        ax2.plot(episodes, history['collisions'], linewidth=2, color='#e74c3c')
+
+    ax2.set_xlabel('Episode', fontsize=12)
+    ax2.set_ylabel('Total Collisions', fontsize=12)
+    ax2.set_title('Collision Reduction', fontweight='bold', fontsize=13)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    # Save rewards and collisions plot
+    key_metrics_path = os.path.join(save_dir, 'training_rewards_collisions.png')
+    plt.savefig(key_metrics_path, dpi=150, bbox_inches='tight')
+    print(f"✓ Key metrics plot saved: {key_metrics_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+    return metrics_path, key_metrics_path
