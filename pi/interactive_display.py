@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-Interactive voice-controlled formation display on Raspberry Pi RGB LED matrix.
-Requires: vosk, PIL, numpy, torch, adafruit_blinka_raspberry_pi5_piomatter
+Interactive formation display on Raspberry Pi RGB LED matrix.
+Supports both voice control and text input modes.
+
+Usage:
+    python interactive_display.py              # Voice control mode (default)
+    python interactive_display.py --text-input # Text input mode
+
+Requires: vosk (for voice mode), PIL, numpy, torch, adafruit_blinka_raspberry_pi5_piomatter
 """
 
 import sys
@@ -10,6 +16,7 @@ import json
 import tempfile
 import subprocess
 import time
+import argparse
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -17,21 +24,26 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
-import vosk
+try:
+    import vosk
+except ImportError:
+    vosk = None
 import adafruit_blinka_raspberry_pi5_piomatter as piomatter
 
 from environment.grid_env import parallel_env
-from environment.model import Actor, dict_obs_to_tensor
+from environment.model import ActorCNN, ActorMLP, dict_obs_to_tensor
 from llm.shape_gen import gen_shape, generate_default_circle
 
 
 # Configuration
 VOSK_MODEL_PATH = "vosk-model-small-en-us-0.15"
-ACTOR_MODEL_PATH = "models/actor_mlp_final.pt"  # Using MLP (default architecture)
-ACTOR_TYPE = "mlp"  # Set to "cnn" if using CNN model
+ACTOR_MODEL_PATH = "models/actor_cnn_final.pt"  # Using CNN (default architecture)
+ACTOR_TYPE = "cnn"  # Set to "mlp" if using MLP model
 WIDTH = 64
 HEIGHT = 64
 STEP_DELAY = 0.1  # Seconds between steps
+DEFAULT_N_AGENTS = 8  # Set to a number to skip agent count prompt, or None to always ask
+SKIP_AGENT_PROMPT = True  # Set to True to use DEFAULT_N_AGENTS without confirmation
 
 
 # Color palette for agents (distinct colors)
@@ -104,21 +116,44 @@ def listen_once(recognizer):
     return text
 
 
-def get_yes_no(recognizer):
+def text_input_once(prompt=""):
     """
-    Listen for yes/no response.
+    Get text input from keyboard.
+
+    Args:
+        prompt: Prompt to display
+
+    Returns:
+        str: User input text
+    """
+    if prompt:
+        print(prompt)
+    return input("> ").strip()
+
+
+def get_yes_no(recognizer=None, use_text_input=False):
+    """
+    Get yes/no response via voice or text.
+
+    Args:
+        recognizer: Vosk recognizer (required if use_text_input=False)
+        use_text_input: If True, use text input instead of voice
 
     Returns:
         bool: True for yes, False for no
     """
     while True:
-        response = listen_once(recognizer).lower()
-        if "yes" in response or "yeah" in response or "correct" in response:
+        if use_text_input:
+            response = text_input_once("Enter 'yes' or 'no'").lower()
+        else:
+            response = listen_once(recognizer).lower()
+
+        if "yes" in response or "yeah" in response or "correct" in response or response == "y":
             return True
-        elif "no" in response or "nope" in response or "wrong" in response:
+        elif "no" in response or "nope" in response or "wrong" in response or response == "n":
             return False
         else:
-            print("Please say 'yes' or 'no'")
+            print("Please say/type 'yes' or 'no'")
 
 
 def extract_number(text):
@@ -287,21 +322,39 @@ def run_policy_on_matrix(actor, env, target_coords, n_agents, matrix, canvas, fr
 
 
 def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Interactive Formation Display')
+    parser.add_argument('--text-input', action='store_true',
+                       help='Use text input instead of voice recognition')
+    args = parser.parse_args()
+
     print("="*60)
     print("Interactive Formation Display")
+    if args.text_input:
+        print("(Text Input Mode)")
+    else:
+        print("(Voice Control Mode)")
     print("="*60)
     print()
 
-    # Initialize speech recognition
-    print("Initializing speech recognition...")
-    if not os.path.exists(VOSK_MODEL_PATH):
-        print(f"Error: Vosk model not found at {VOSK_MODEL_PATH}")
-        print("Please download: https://alphacephei.com/vosk/models")
-        return
+    # Initialize speech recognition (unless using text input)
+    recognizer = None
+    if not args.text_input:
+        if vosk is None:
+            print("Error: vosk module not found")
+            print("Please install vosk: pip install vosk")
+            print("Or use text input mode: python interactive_display.py --text-input")
+            return
 
-    model = vosk.Model(VOSK_MODEL_PATH)
-    recognizer = vosk.KaldiRecognizer(model, 16000)
-    print("✓ Speech recognition ready\n")
+        print("Initializing speech recognition...")
+        if not os.path.exists(VOSK_MODEL_PATH):
+            print(f"Error: Vosk model not found at {VOSK_MODEL_PATH}")
+            print("Please download: https://alphacephei.com/vosk/models")
+            return
+
+        model = vosk.Model(VOSK_MODEL_PATH)
+        recognizer = vosk.KaldiRecognizer(model, 16000)
+        print("✓ Speech recognition ready\n")
 
     # Initialize LED matrix
     print("Initializing LED matrix...")
@@ -312,53 +365,65 @@ def main():
     shape = None
     while shape is None:
         print("What shape would you like? (circle, square, triangle, line, etc.)")
-        print("Listening...")
 
-        shape_text = listen_once(recognizer)
-        if not shape_text:
-            print("Didn't hear anything, please try again\n")
-            continue
+        if args.text_input:
+            shape_text = text_input_once()
+        else:
+            print("Listening...")
+            shape_text = listen_once(recognizer)
+            if not shape_text:
+                print("Didn't hear anything, please try again\n")
+                continue
 
-        print(f"Heard: '{shape_text}'")
+        print(f"{'Entered' if args.text_input else 'Heard'}: '{shape_text}'")
         print("Is this correct? (yes/no)")
 
-        if get_yes_no(recognizer):
+        if get_yes_no(recognizer, use_text_input=args.text_input):
             shape = shape_text
             print(f"✓ Shape confirmed: {shape}\n")
         else:
             print("Let's try again\n")
 
     # Step 2: Get number of agents
-    n_agents = None
-    while n_agents is None:
-        print("How many agents? (say a number)")
-        print("Listening...")
+    if SKIP_AGENT_PROMPT and DEFAULT_N_AGENTS is not None:
+        # Use default without prompting
+        n_agents = DEFAULT_N_AGENTS
+        print(f"Using {n_agents} agents (default)\n")
+    else:
+        # Interactive prompt for agent count
+        n_agents = None
+        while n_agents is None:
+            print("How many agents? (enter a number)")
 
-        number_text = listen_once(recognizer)
-        if not number_text:
-            print("Didn't hear anything, please try again\n")
-            continue
+            if args.text_input:
+                number_text = text_input_once()
+            else:
+                print("Listening...")
+                number_text = listen_once(recognizer)
+                if not number_text:
+                    print("Didn't hear anything, please try again\n")
+                    continue
 
-        n_agents = extract_number(number_text)
-        if n_agents is None:
-            print(f"Couldn't understand number from: '{number_text}'")
-            print("Please try again\n")
-            continue
+            n_agents = extract_number(number_text)
+            if n_agents is None:
+                print(f"Couldn't understand number from: '{number_text}'")
+                print("Please try again\n")
+                continue
 
-        # Limit to reasonable number for display
-        if n_agents < 2 or n_agents > 20:
-            print(f"Number must be between 2 and 20 (heard: {n_agents})")
-            n_agents = None
-            continue
+            # Limit to reasonable number for display
+            if n_agents < 2 or n_agents > 20:
+                print(f"Number must be between 2 and 20 ({'entered' if args.text_input else 'heard'}: {n_agents})")
+                n_agents = None
+                continue
 
-        print(f"Heard: {n_agents} agents")
-        print("Is this correct? (yes/no)")
+            print(f"{'Entered' if args.text_input else 'Heard'}: {n_agents} agents")
+            print("Is this correct? (yes/no)")
 
-        if get_yes_no(recognizer):
-            print(f"✓ Number of agents confirmed: {n_agents}\n")
-        else:
-            n_agents = None
-            print("Let's try again\n")
+            if get_yes_no(recognizer, use_text_input=args.text_input):
+                print(f"✓ Number of agents confirmed: {n_agents}\n")
+            else:
+                n_agents = None
+                print("Let's try again\n")
 
     # Step 3: Generate target coordinates
     print(f"Generating target coordinates for '{shape}' with {n_agents} agents...")
@@ -379,7 +444,11 @@ def main():
         print("Please train a model first using: python main.py --mode train")
         return
 
-    actor = Actor(obs_radius=5).to('cpu')
+    # Select the correct actor class based on ACTOR_TYPE
+    ActorClass = ActorCNN if ACTOR_TYPE.lower() == "cnn" else ActorMLP
+    print(f"Using {ACTOR_TYPE.upper()} architecture")
+
+    actor = ActorClass(obs_radius=5).to('cpu')
     actor.load_state_dict(torch.load(ACTOR_MODEL_PATH, map_location='cpu'))
     actor.eval()
     print("✓ Model loaded\n")

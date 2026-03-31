@@ -177,8 +177,8 @@ class ActorMLP(nn.Module):
         return action, log_prob
 
 
-# Default Actor is MLP (more efficient for this task)
-Actor = ActorMLP
+# Default Actor is CNN
+Actor = ActorCNN
 
 
 class Critic(nn.Module):

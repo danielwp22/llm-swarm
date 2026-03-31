@@ -97,8 +97,8 @@ def main():
                         help='Directory to save visualizations')
     parser.add_argument('--no_animation', action='store_true',
                         help='Skip animation generation (faster)')
-    parser.add_argument('--actor_type', type=str, default='mlp', choices=['mlp', 'cnn'],
-                        help='Actor architecture type: mlp (default, simpler) or cnn (convolutional)')
+    parser.add_argument('--actor_type', type=str, default='cnn', choices=['mlp', 'cnn'],
+                        help='Actor architecture type: cnn (default, convolutional) or mlp (simpler)')
 
     args = parser.parse_args()
 
