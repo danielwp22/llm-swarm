@@ -1,12 +1,23 @@
 import torch
 import argparse
+import random
 from environment.grid_env import parallel_env
-from environment.train import train_mappo, load_models
+from environment.train import train_mappo, load_actor
+from environment.train_improved import train_mappo_improved
 from environment.model import dict_obs_to_tensor
-from llm.shape_gen import gen_shape
+from llm.shape_gen import gen_shape, generate_builtin_shape
 
 
-def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, device='cpu', render=True):
+def run_trained_policy(
+    env,
+    actor,
+    n_agents,
+    target_coords,
+    max_steps=500,
+    device='cpu',
+    render=True,
+    deterministic=True,
+):
     """
     Run the trained policy on the environment.
 
@@ -18,6 +29,7 @@ def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, devic
         max_steps: Maximum steps to run
         device: Device to run on
         render: Whether to render the environment
+        deterministic: If True use argmax actions; if False sample stochastically
     """
     obs, info = env.reset(seed=42, target_coords=target_coords)
 
@@ -37,7 +49,7 @@ def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, devic
             obs_tensor = dict_obs_to_tensor(obs[agent], device)
 
             with torch.no_grad():
-                action, _ = actor.get_action(obs_tensor, deterministic=True)
+                action, _ = actor.get_action(obs_tensor, deterministic=deterministic)
 
             actions[agent] = action.item()
 
@@ -71,14 +83,35 @@ def run_trained_policy(env, actor, n_agents, target_coords, max_steps=500, devic
     env.close()
 
 
+def _parse_shape_list(shape_list_arg):
+    if not shape_list_arg:
+        return []
+    return [shape.strip() for shape in shape_list_arg.split(",") if shape.strip()]
+
+
+def _resolve_target_coords(shape, n_agents, no_llm):
+    builtin = generate_builtin_shape(shape, n_agents=n_agents, grid_size=64)
+    if builtin is not None:
+        return builtin
+
+    if no_llm:
+        raise ValueError(f"Shape '{shape}' is not a supported built-in shape and --no_llm was set.")
+
+    return gen_shape(shape, n_agents=n_agents, grid_size=64)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Multi-Agent Formation Control with CTDE')
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'demo'],
                         help='Mode: train, eval, or demo')
+    parser.add_argument('--trainer', type=str, default='baseline', choices=['baseline', 'improved'],
+                        help='Training implementation to use for train/eval artifact paths')
     parser.add_argument('--n_agents', type=int, default=4,
                         help='Number of agents')
     parser.add_argument('--shape', type=str, default='circle',
                         help='Shape to form (e.g., circle, square, line, triangle)')
+    parser.add_argument('--train_shapes', type=str, default=None,
+                        help='Comma-separated list of shapes to sample during training, e.g. circle,triangle,square')
     parser.add_argument('--n_episodes', type=int, default=1000,
                         help='Number of training episodes')
     parser.add_argument('--obs_radius', type=int, default=5,
@@ -99,6 +132,23 @@ def main():
                         help='Skip animation generation (faster)')
     parser.add_argument('--actor_type', type=str, default='cnn', choices=['mlp', 'cnn'],
                         help='Actor architecture type: cnn (default, convolutional) or mlp (simpler)')
+    parser.add_argument('--entropy_coef', type=float, default=0.01,
+                        help='Initial entropy coefficient for PPO training')
+    parser.add_argument('--entropy_coef_end', type=float, default=0.001,
+                        help='Final entropy coefficient for linear decay during training')
+    parser.add_argument('--num_mini_batch', type=int, default=4,
+                        help='Number of PPO mini-batches per epoch')
+    parser.add_argument('--ppo_epochs', type=int, default=None,
+                        help='Override PPO epochs. Defaults: baseline=4, improved=15')
+    parser.add_argument('--critic_input_type', type=str, default='agent_specific',
+                        choices=['shared', 'agent_specific', 'full_local_concat'],
+                        help='Improved trainer critic input: compact shared state, paper-style agent-specific state, or full local-grid concat ablation')
+    parser.add_argument('--no_clipped_value_loss', action='store_true',
+                        help='Disable clipped value loss for critic update')
+    parser.add_argument('--stochastic_eval', action='store_true',
+                        help='In eval, sample actions stochastically instead of argmax')
+    parser.add_argument('--easy_curriculum', action='store_true',
+                        help='Training helper: force n_agents=4, no_llm, shape=circle')
 
     args = parser.parse_args()
 
@@ -111,6 +161,12 @@ def main():
         print("Warning: CUDA not available, falling back to CPU")
         args.device = 'cpu'
 
+    if args.mode == 'train' and args.easy_curriculum:
+        args.n_agents = 4
+        args.no_llm = True
+        args.shape = 'circle'
+        print("Easy curriculum enabled: using n_agents=4, no_llm=True, shape='circle'")
+
     print(f"\n{'='*60}")
     print("Multi-Agent Formation Control with CTDE")
     print(f"{'='*60}")
@@ -119,26 +175,45 @@ def main():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"CUDA Version: {torch.version.cuda}")
     print(f"Actor Type: {args.actor_type.upper()}")
+    print(f"Trainer: {args.trainer.upper()}")
+    if args.trainer == 'improved':
+        print(f"Critic Input: {args.critic_input_type.upper()}")
     print(f"{'='*60}\n")
 
-    # Step 1: Generate target coordinates using LLM
-    print(f"Step 1: Generating target coordinates for '{args.shape}'...")
+    train_shapes = _parse_shape_list(args.train_shapes) if args.mode == 'train' else []
 
-    if args.no_llm:
-        # Use default circle formation
-        from llm.shape_gen import generate_default_circle
-        target_coords = generate_default_circle(args.n_agents, grid_size=64)
-        print(f"Using default circle formation (no LLM)")
+    # Step 1: Generate target coordinates
+    if train_shapes:
+        print(f"Step 1: Precomputing training target coordinates for shapes: {train_shapes}...")
+        target_bank = {}
+        for shape_name in train_shapes:
+            try:
+                target_bank[shape_name] = _resolve_target_coords(shape_name, args.n_agents, args.no_llm)
+            except Exception as e:
+                print(f"Failed to generate shape '{shape_name}': {e}")
+                raise
+
+        sampler_rng = random.Random(42)
+        sampled_shapes = train_shapes[:]
+
+        def target_coords_sampler(_episode):
+            shape_name = sampler_rng.choice(sampled_shapes)
+            return target_bank[shape_name]
+
+        eval_shape = args.shape if args.shape in target_bank else train_shapes[0]
+        target_coords = target_bank[eval_shape]
+        print(f"Training shapes ready. Post-train eval shape: '{eval_shape}'")
+        print(f"\nExample target coordinates ({eval_shape}): {target_coords}\n")
     else:
+        print(f"Step 1: Generating target coordinates for '{args.shape}'...")
         try:
-            target_coords = gen_shape(args.shape, n_agents=args.n_agents, grid_size=64)
+            target_coords = _resolve_target_coords(args.shape, args.n_agents, args.no_llm)
         except Exception as e:
-            print(f"LLM generation failed: {e}")
-            print("Falling back to default circle formation")
-            from llm.shape_gen import generate_default_circle
-            target_coords = generate_default_circle(args.n_agents, grid_size=64)
-
-    print(f"\nTarget coordinates: {target_coords}\n")
+            print(f"Target generation failed: {e}")
+            print("Falling back to built-in circle formation")
+            target_coords = generate_builtin_shape("circle", args.n_agents, 64)
+        target_coords_sampler = None
+        print(f"\nTarget coordinates: {target_coords}\n")
 
     # Step 2: Create environment
     print(f"Step 2: Creating environment...")
@@ -150,24 +225,56 @@ def main():
     print(f"Environment created with {args.n_agents} agents\n")
 
     if args.mode == 'train':
+        ppo_epochs = args.ppo_epochs
+        if ppo_epochs is None:
+            ppo_epochs = 15 if args.trainer == 'improved' else 4
+
+        save_dir = f'models/{args.trainer}'
+
         # Step 3: Train the policy
-        print(f"Step 3: Training MAPPO policy...")
+        print(f"Step 3: Training {args.trainer} MAPPO policy...")
         print(f"Training for {args.n_episodes} episodes...\n")
 
-        actor, critic, history = train_mappo(
-            env=env,
-            n_agents=args.n_agents,
-            target_coords=target_coords,
-            n_episodes=args.n_episodes,
-            obs_radius=args.obs_radius,
-            device=args.device,
-            save_dir='models',
-            log_interval=10,
-            actor_type=args.actor_type,
-        )
+        if args.trainer == 'improved':
+            actor, critic, history = train_mappo_improved(
+                env=env,
+                n_agents=args.n_agents,
+                target_coords=target_coords,
+                target_coords_sampler=target_coords_sampler,
+                n_episodes=args.n_episodes,
+                obs_radius=args.obs_radius,
+                device=args.device,
+                save_dir=save_dir,
+                log_interval=10,
+                actor_type=args.actor_type,
+                entropy_coef=args.entropy_coef,
+                entropy_coef_end=args.entropy_coef_end,
+                num_mini_batch=args.num_mini_batch,
+                ppo_epochs=ppo_epochs,
+                critic_input_type=args.critic_input_type,
+                use_clipped_value_loss=not args.no_clipped_value_loss,
+            )
+        else:
+            actor, critic, history = train_mappo(
+                env=env,
+                n_agents=args.n_agents,
+                target_coords=target_coords,
+                target_coords_sampler=target_coords_sampler,
+                n_episodes=args.n_episodes,
+                obs_radius=args.obs_radius,
+                device=args.device,
+                save_dir=save_dir,
+                log_interval=10,
+                actor_type=args.actor_type,
+                entropy_coef=args.entropy_coef,
+                entropy_coef_end=args.entropy_coef_end,
+                num_mini_batch=args.num_mini_batch,
+                ppo_epochs=ppo_epochs,
+                use_clipped_value_loss=not args.no_clipped_value_loss,
+            )
 
         print(f"\nStep 4: Running trained policy...")
-        run_trained_policy(env, actor, args.n_agents, target_coords, device=args.device)
+        run_trained_policy(env, actor, args.n_agents, target_coords, device=args.device, deterministic=True)
 
         # Visualization
         if args.visualize:
@@ -192,25 +299,31 @@ def main():
 
     elif args.mode == 'eval':
         # Load and evaluate trained model
-        print(f"Step 3: Loading trained models...")
+        print(f"Step 3: Loading trained actor...")
 
         # Use architecture-specific default paths if not provided
-        actor_path = args.actor_path if args.actor_path else f'models/actor_{args.actor_type}_final.pt'
-        critic_path = args.critic_path if args.critic_path else f'models/critic_{args.actor_type}_final.pt'
+        actor_path = args.actor_path if args.actor_path else f'models/{args.trainer}/actor_{args.actor_type}_final.pt'
+        if args.critic_path:
+            print("Note: --critic_path is ignored in eval mode (CTDE execution only needs the actor).")
 
         try:
-            actor, critic = load_models(
+            actor = load_actor(
                 actor_path,
-                critic_path,
-                n_agents=args.n_agents,
                 obs_radius=args.obs_radius,
                 device=args.device,
                 actor_type=args.actor_type,
             )
-            print(f"Models loaded successfully\n")
+            print(f"Actor loaded successfully\n")
 
             print(f"Step 4: Evaluating policy...")
-            run_trained_policy(env, actor, args.n_agents, target_coords, device=args.device)
+            run_trained_policy(
+                env,
+                actor,
+                args.n_agents,
+                target_coords,
+                device=args.device,
+                deterministic=not args.stochastic_eval,
+            )
 
             # Visualization
             if args.visualize:
@@ -222,12 +335,13 @@ def main():
                     target_coords=target_coords,
                     device=args.device,
                     save_dir=args.vis_dir,
-                    create_animation=not args.no_animation
+                    create_animation=not args.no_animation,
+                    deterministic=not args.stochastic_eval,
                 )
 
         except Exception as e:
             print(f"Error loading models: {e}")
-            print("Please train the model first using --mode train")
+            print("Check that --n_agents, --obs_radius, and --actor_type match the training run.")
 
     elif args.mode == 'demo':
         # Run random actions for demonstration

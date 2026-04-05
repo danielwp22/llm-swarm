@@ -1,10 +1,83 @@
 import os
 import json
+import math
+import numpy as np
 from openai import OpenAI
 
 # The client automatically picks up the OPENAI_API_KEY environment variable
 # Alternatively, you can pass the key explicitly: client = OpenAI(api_key="YOUR_API_KEY")
 client = OpenAI()
+
+
+def _normalize_shape_name(prompt):
+    return (prompt or "").strip().lower()
+
+
+def generate_default_line(n_agents, grid_size=64):
+    center = grid_size // 2
+    start_x = max(2, center - n_agents // 2)
+    y = center
+    return [[min(grid_size - 3, start_x + i), y] for i in range(n_agents)]
+
+
+def generate_default_square(n_agents, grid_size=64):
+    center = grid_size // 2
+    side = max(8, grid_size // 3)
+    perimeter = max(4, 4 * side)
+    coordinates = []
+    for i in range(n_agents):
+        t = int(round(i * perimeter / n_agents)) % perimeter
+        if t < side:
+            x = center - side // 2 + t
+            y = center - side // 2
+        elif t < 2 * side:
+            x = center + side // 2
+            y = center - side // 2 + (t - side)
+        elif t < 3 * side:
+            x = center + side // 2 - (t - 2 * side)
+            y = center + side // 2
+        else:
+            x = center - side // 2
+            y = center + side // 2 - (t - 3 * side)
+        x = max(0, min(x, grid_size - 1))
+        y = max(0, min(y, grid_size - 1))
+        coordinates.append([x, y])
+    return coordinates
+
+
+def generate_default_triangle(n_agents, grid_size=64):
+    center = grid_size // 2
+    radius = grid_size // 3
+    vertices = np.array([
+        [center, center + radius],
+        [center - radius, center - radius],
+        [center + radius, center - radius],
+    ], dtype=np.float32)
+    coordinates = []
+    for i in range(n_agents):
+        edge_idx = i % 3
+        edge_progress = (i // 3 + (i % 3) / 3.0) / max(1, math.ceil(n_agents / 3))
+        edge_progress = min(edge_progress, 0.999)
+        start = vertices[edge_idx]
+        end = vertices[(edge_idx + 1) % 3]
+        point = start + edge_progress * (end - start)
+        x = int(round(point[0]))
+        y = int(round(point[1]))
+        coordinates.append([max(0, min(x, grid_size - 1)), max(0, min(y, grid_size - 1))])
+    return coordinates
+
+
+def generate_builtin_shape(prompt, n_agents=4, grid_size=64):
+    shape = _normalize_shape_name(prompt)
+    if shape == "circle":
+        return generate_default_circle(n_agents, grid_size)
+    if shape == "line":
+        return generate_default_line(n_agents, grid_size)
+    if shape == "square":
+        return generate_default_square(n_agents, grid_size)
+    if shape == "triangle":
+        return generate_default_triangle(n_agents, grid_size)
+    return None
 
 def get_completion(prompt, n_agents=4, grid_size=64):
     """
@@ -97,8 +170,6 @@ def generate_default_circle(n_agents, grid_size=64):
     Returns:
         List of coordinates forming a circle
     """
-    import math
-
     center = grid_size // 2
     radius = grid_size // 3
 
@@ -133,7 +204,11 @@ def gen_shape(prompt=None, n_agents=4, grid_size=64):
 
     print(f"\nGenerating {prompt} formation for {n_agents} agents on {grid_size}x{grid_size} grid...")
 
-    coordinates = get_completion(prompt, n_agents, grid_size)
+    builtin = generate_builtin_shape(prompt, n_agents, grid_size)
+    if builtin is not None:
+        coordinates = builtin
+    else:
+        coordinates = get_completion(prompt, n_agents, grid_size)
 
     print(f"\nGenerated coordinates:")
     for i, coord in enumerate(coordinates):

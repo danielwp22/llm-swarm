@@ -7,10 +7,14 @@ A multi-agent reinforcement learning project where agents learn to form shapes o
 ```
 final_project/
 ├── main.py                  # Main entry point
+├── train_improved.py        # Wrapper entry point for improved MAPPO trainer
+├── cbs_solver.py            # Conflict-Based Search baseline planner
+├── shape_preview.py         # Preview generated target shapes
 ├── environment/
 │   ├── grid_env.py         # PettingZoo grid navigation environment
 │   ├── model.py            # Actor-Critic neural networks
-│   └── train.py            # MAPPO training algorithm
+│   ├── train.py            # Baseline MAPPO training algorithm
+│   └── train_improved.py   # More MAPPO-like training variant
 ├── llm/
 │   └── shape_gen.py        # LLM-based shape coordinate generation
 ├── config/                 # Configuration files
@@ -24,8 +28,12 @@ final_project/
 - **Local Observations**: Each agent observes a local radius around itself (CTDE principle)
 - **LLM Shape Generation**: Natural language → coordinates via OpenAI API
 - **MAPPO Training**: Multi-Agent Proximal Policy Optimization
+- **Improved MAPPO Variant**: Optional value normalization, Huber critic loss, richer critic inputs
 - **Collision Avoidance**: Agents are penalized for collisions with tracking metrics
 - **Formation Rewards**: Bonus rewards for reaching target formation
+- **Multi-Shape Training**: Sample different target formations during training for better generalization
+- **CBS Baseline**: Classical conflict-based search solver for comparison against RL
+- **Shape Preview Tool**: Render target coordinates for built-in or LLM-generated shapes
 - **GPU Acceleration**: Automatic CUDA detection for faster training
 - **Visualization Tools**: Matplotlib-based plotting and GIF animation generation
 
@@ -75,9 +83,24 @@ Train agents to form a circle with 8 agents (uses CNN by default, auto-detects G
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000
 ```
 
+Train with the improved MAPPO-style trainer:
+```bash
+python train_improved.py --mode train --shape circle --n_agents 8 --n_episodes 1000
+```
+
 Train with MLP architecture:
 ```bash
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp
+```
+
+Train the improved trainer with paper-style settings for a simple environment:
+```bash
+python train_improved.py --mode train --shape circle --n_agents 8 --n_episodes 5000 --obs_radius 7 --actor_type mlp --ppo_epochs 10 --num_mini_batch 1 --critic_input_type agent_specific
+```
+
+Train on multiple shapes for better generalization:
+```bash
+python train_improved.py --mode train --shape triangle --train_shapes circle,triangle,square,line --n_agents 8 --n_episodes 5000 --obs_radius 7 --actor_type mlp --ppo_epochs 10 --num_mini_batch 1 --critic_input_type agent_specific
 ```
 
 Train both architectures for comparison:
@@ -121,6 +144,11 @@ Evaluate a trained MLP model:
 python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp
 ```
 
+Evaluate the improved trainer and create plots/GIFs:
+```bash
+python train_improved.py --mode eval --shape circle --n_agents 8 --obs_radius 7 --actor_type mlp --visualize --vis_dir visualizations/improved_eval
+```
+
 Load from specific checkpoint:
 ```bash
 python main.py --mode eval --actor_path models/actor_mlp_ep500.pt --critic_path models/critic_mlp_ep500.pt --actor_type mlp
@@ -138,11 +166,42 @@ Run random policy for demonstration:
 python main.py --mode demo --shape triangle --n_agents 6
 ```
 
+### Shape Preview
+
+Preview a built-in target shape:
+```bash
+python shape_preview.py --shape triangle --n_agents 8 --no_llm
+```
+
+Preview an arbitrary LLM-generated shape:
+```bash
+python shape_preview.py --shape tree --n_agents 8
+```
+
+Save the preview without opening a window:
+```bash
+python shape_preview.py --shape tree --n_agents 8 --no_show --vis_dir visualizations/shape_preview
+```
+
+### CBS Baseline
+
+Run the conflict-based search planner and save its visualization:
+```bash
+python cbs_solver.py --shape triangle --n_agents 8 --obs_radius 7 --vis_dir visualizations/cbs_triangle
+```
+
+Use only built-in shapes for CBS:
+```bash
+python cbs_solver.py --shape triangle --n_agents 8 --obs_radius 7 --vis_dir visualizations/cbs_triangle --no_llm
+```
+
 ## Command Line Arguments
 
 - `--mode`: Operation mode (`train`, `eval`, `demo`)
+- `--trainer`: Training implementation (`baseline` or `improved`; default: `baseline`)
 - `--n_agents`: Number of agents (default: 4)
 - `--shape`: Shape description for LLM (default: 'circle')
+- `--train_shapes`: Comma-separated list of shapes to sample during training
 - `--n_episodes`: Training episodes (default: 1000)
 - `--obs_radius`: Local observation radius (default: 5)
 - `--device`: Device to use (`auto`, `cpu`, or `cuda`; default: 'auto')
@@ -158,6 +217,11 @@ python main.py --mode demo --shape triangle --n_agents 6
 - `--visualize`: Create visualizations (plots and animations)
 - `--vis_dir`: Directory to save visualizations (default: 'visualizations')
 - `--no_animation`: Skip animation generation (faster, only creates static plots)
+- `--ppo_epochs`: Override PPO epochs
+- `--num_mini_batch`: Number of PPO mini-batches per epoch
+- `--critic_input_type`: Improved trainer critic input (`shared`, `agent_specific`, `full_local_concat`)
+- `--stochastic_eval`: Evaluate by sampling actions instead of using argmax
+- `--easy_curriculum`: Force a simple 4-agent circle training setup
 
 ## Environment Details
 
@@ -174,11 +238,11 @@ python main.py --mode demo --shape triangle --n_agents 6
 
 ### Reward Function
 ```python
-reward = -distance_to_target        # Main objective
-         - 10 * collision            # Collision penalty
-         - 0.01                      # Step penalty
-         + 10 * reached_target       # Target bonus
-         + 20 * all_at_target        # Formation bonus
+reward = -distance / (grid_size / 10)   # Main objective
+         - 0.5 * collision              # Collision penalty
+         - 0.01                         # Step penalty
+         + 10 * first_arrival_bonus     # One-time target bonus per agent
+         + 20 * all_at_target           # Formation bonus
 ```
 
 ## Algorithm: MAPPO
@@ -190,6 +254,19 @@ reward = -distance_to_target        # Main objective
 - **PPO Loss**: Clipped surrogate objective with entropy regularization
 - **GAE**: Generalized Advantage Estimation for variance reduction
 
+### Improved Trainer
+
+The improved trainer adds a more MAPPO-like comparison path:
+
+- **Value normalization** for the critic target
+- **Huber critic loss** support
+- **Configurable critic inputs**
+  - `shared`: compact team summary only
+  - `agent_specific`: team summary plus the current agent's local grid and ID
+  - `full_local_concat`: all agents' local grids concatenated as a larger ablation
+- **Separate artifact directory**: `models/improved/`
+- **Wrapper entry point**: `python train_improved.py ...`
+
 ## Neural Network Architecture
 
 The project supports two Actor architectures that can be selected with `--actor_type`:
@@ -197,7 +274,7 @@ The project supports two Actor architectures that can be selected with `--actor_
 ### ActorCNN (Default)
 ```
 CNN (3 layers) → Process local grid
-MLP → Process state features (position, target, velocity)
+MLP → Process state features (position, target, relative position, velocity)
 Concatenate → FC layers → Action probabilities (9 actions)
 
 Parameters: ~587K
@@ -206,7 +283,7 @@ Best for: Dense visual patterns
 
 ### ActorMLP (Alternative)
 ```
-Flatten local grid (11×11×3 = 363) → Concatenate with state features (6)
+Flatten local grid (11×11×3 = 363) → Concatenate with state features (8)
 → FC layers (256 → 256 → 128) → Action probabilities (9 actions)
 
 Parameters: ~231K

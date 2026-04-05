@@ -24,8 +24,8 @@ class ActorCNN(nn.Module):
         # Calculate flattened conv output size
         conv_output_size = local_grid_size * local_grid_size * 64
 
-        # MLP for position, target, and velocity (2 + 2 + 2 = 6 dimensions)
-        self.fc_state = nn.Linear(6, 64)
+        # MLP for position, target, relative position, and velocity (2 + 2 + 2 + 2 = 8 dimensions)
+        self.fc_state = nn.Linear(8, 64)
 
         # Combine CNN output with state features
         self.fc1 = nn.Linear(conv_output_size + 64, hidden_dim)
@@ -54,7 +54,8 @@ class ActorCNN(nn.Module):
         self_pos = obs['self_position']  # (batch, 2)
         target_pos = obs['target_position']  # (batch, 2)
         velocity = obs['velocity']  # (batch, 2)
-        state_features = torch.cat([self_pos, target_pos, velocity], dim=1)  # (batch, 6)
+        relative_pos = target_pos - self_pos  # (batch, 2) explicit direction to goal
+        state_features = torch.cat([self_pos, target_pos, relative_pos, velocity], dim=1)  # (batch, 8)
 
         x_state = F.relu(self.fc_state(state_features))
 
@@ -108,11 +109,11 @@ class ActorMLP(nn.Module):
         # Flatten local grid: (11, 11, 3) = 363 dimensions
         grid_input_size = local_grid_size * local_grid_size * 3
 
-        # State features: position (2) + target (2) + velocity (2) = 6 dimensions
-        state_input_size = 6
+        # State features: position (2) + target (2) + relative position (2) + velocity (2) = 8 dimensions
+        state_input_size = 8
 
         # Total input size
-        total_input_size = grid_input_size + state_input_size  # 363 + 6 = 369
+        total_input_size = grid_input_size + state_input_size  # 363 + 8 = 371
 
         # MLP layers
         self.fc1 = nn.Linear(total_input_size, hidden_dim)
@@ -137,10 +138,11 @@ class ActorMLP(nn.Module):
         self_pos = obs['self_position']  # (batch, 2)
         target_pos = obs['target_position']  # (batch, 2)
         velocity = obs['velocity']  # (batch, 2)
-        state_features = torch.cat([self_pos, target_pos, velocity], dim=1)  # (batch, 6)
+        relative_pos = target_pos - self_pos  # (batch, 2) explicit direction to goal
+        state_features = torch.cat([self_pos, target_pos, relative_pos, velocity], dim=1)  # (batch, 8)
 
         # Combine all features
-        x = torch.cat([grid_flat, state_features], dim=1)  # (batch, 369)
+        x = torch.cat([grid_flat, state_features], dim=1)  # (batch, 371)
 
         # Process through MLP
         x = F.relu(self.fc1(x))
@@ -241,6 +243,25 @@ class Critic(nn.Module):
         value = self.value_head(x)
 
         return value
+
+
+class CentralizedCritic(nn.Module):
+    """
+    Centralized critic with configurable input size for richer joint observations.
+    """
+    def __init__(self, input_dim, hidden_dim=512):
+        super(CentralizedCritic, self).__init__()
+
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
+        self.value_head = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        return self.value_head(x)
 
 
 def dict_obs_to_tensor(obs_dict, device='cpu'):

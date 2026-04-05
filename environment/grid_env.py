@@ -134,6 +134,8 @@ class parallel_env(ParallelEnv):
 
         # Initialize velocities
         self.velocities = {agent: np.array([0, 0], dtype=np.float32) for agent in self.agents}
+        self.arrival_bonus_awarded = {agent: False for agent in self.agents}
+
 
         observations = {agent: self._get_observation(agent) for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
@@ -241,13 +243,15 @@ class parallel_env(ParallelEnv):
         for agent in self.agents:
             distance = np.linalg.norm(self.agent_positions[agent] - self.target_positions[agent])
 
-            # Reward components
-            distance_reward = -distance / self.grid_size  # Normalized negative distance
-            collision_penalty = -10.0 if collision_flags[agent] else 0.0
-            step_penalty = -0.01  # Encourage efficiency
+            distance_reward = -distance / (self.grid_size / 10)  # ~10x stronger penalty
+            collision_penalty = -0.5 if collision_flags[agent] else 0.0
+            step_penalty = -0.01  # Encourage faster convergence
 
-            # Check if agent reached target (within 1 unit)
-            at_target_bonus = 10.0 if distance < 1.5 else 0.0
+            # Pay the arrival bonus only the first time an agent reaches its target.
+            just_arrived = distance < 1.5 and not self.arrival_bonus_awarded[agent]
+            at_target_bonus = 10.0 if just_arrived else 0.0
+            if just_arrived:
+                self.arrival_bonus_awarded[agent] = True
 
             rewards[agent] = distance_reward + collision_penalty + step_penalty + at_target_bonus
 

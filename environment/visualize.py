@@ -308,7 +308,7 @@ class GridVisualizer:
 
 
 def visualize_from_env(env, actor, target_coords, n_steps=500, device='cpu',
-                       save_dir='visualizations', create_animation=True):
+                       save_dir='visualizations', create_animation=True, deterministic=True):
     """
     Run the environment with a trained actor and visualize the results.
 
@@ -320,6 +320,7 @@ def visualize_from_env(env, actor, target_coords, n_steps=500, device='cpu',
         device: Device for inference
         save_dir: Directory to save visualizations
         create_animation: Whether to create an animated GIF
+        deterministic: If True use argmax actions; if False sample stochastically
     """
     from .model import dict_obs_to_tensor
 
@@ -352,7 +353,7 @@ def visualize_from_env(env, actor, target_coords, n_steps=500, device='cpu',
         for agent in env.agents:
             obs_tensor = dict_obs_to_tensor(obs[agent], device)
             with torch.no_grad():
-                action, _ = actor.get_action(obs_tensor, deterministic=True)
+                action, _ = actor.get_action(obs_tensor, deterministic=deterministic)
             actions[agent] = action.item()
 
         # Step
