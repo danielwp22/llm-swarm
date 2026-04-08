@@ -8,6 +8,8 @@ from openai import OpenAI
 # Alternatively, you can pass the key explicitly: client = OpenAI(api_key="YOUR_API_KEY")
 client = OpenAI()
 
+DEFAULT_SHAPE_MODEL = os.getenv("OPENAI_SHAPE_MODEL", "gpt-4")
+
 
 def _normalize_shape_name(prompt):
     return (prompt or "").strip().lower()
@@ -53,11 +55,14 @@ def generate_default_triangle(n_agents, grid_size=64):
         [center - radius, center - radius],
         [center + radius, center - radius],
     ], dtype=np.float32)
+    # Distribute n_agents evenly along the full perimeter.
+    # Each edge has equal length (equilateral), so space agents uniformly by fraction.
     coordinates = []
     for i in range(n_agents):
-        edge_idx = i % 3
-        edge_progress = (i // 3 + (i % 3) / 3.0) / max(1, math.ceil(n_agents / 3))
-        edge_progress = min(edge_progress, 0.999)
+        t = i / n_agents  # fraction along total perimeter [0, 1)
+        t_edge = t * 3    # scaled to [0, 3)
+        edge_idx = int(t_edge) % 3
+        edge_progress = t_edge - int(t_edge)
         start = vertices[edge_idx]
         end = vertices[(edge_idx + 1) % 3]
         point = start + edge_progress * (end - start)
@@ -65,6 +70,95 @@ def generate_default_triangle(n_agents, grid_size=64):
         y = int(round(point[1]))
         coordinates.append([max(0, min(x, grid_size - 1)), max(0, min(y, grid_size - 1))])
     return coordinates
+
+
+def generate_random_targets(n_agents, grid_size=64, min_distance=0, rng=None):
+    """
+    Generate random target coordinates with optional minimum Chebyshev distance between pairs.
+
+    Args:
+        n_agents: Number of target positions to generate
+        grid_size: Grid size (coordinates in [0, grid_size-1])
+        min_distance: Minimum Chebyshev distance between any two targets (0 = pure uniform)
+        rng: Optional numpy.random.Generator for reproducibility
+    Returns:
+        List of [x, y] integer coordinate pairs
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    coords = []
+    for _ in range(n_agents):
+        for _ in range(1000):
+            x = int(rng.integers(0, grid_size))
+            y = int(rng.integers(0, grid_size))
+            if all(max(abs(x - cx), abs(y - cy)) >= min_distance for cx, cy in coords):
+                coords.append([x, y])
+                break
+        else:
+            coords.append([int(rng.integers(0, grid_size)), int(rng.integers(0, grid_size))])
+    return coords
+
+
+# Natural agent counts for built-in shapes (used when LLM decides n_agents)
+BUILTIN_NATURAL_COUNTS = {"circle": 8, "square": 8, "triangle": 3, "line": 4}
+
+
+def get_completion_with_agent_count(prompt, grid_size=64, min_agents=2, max_agents=16):
+    """
+    Like get_completion but asks the LLM to decide the number of agents.
+
+    Args:
+        prompt: Natural language shape description
+        grid_size: Grid size
+        min_agents: Minimum agents the LLM may choose
+        max_agents: Maximum agents the LLM may choose
+    Returns:
+        (n_agents: int, coordinates: List[[x, y]])
+    """
+    system_prompt = f"""You are placing agents on a {grid_size}x{grid_size} grid to form a recognizable shape.
+
+Coordinate system: x increases RIGHT, y increases UP. So y=0 is the BOTTOM, y={grid_size-1} is the TOP.
+Center of the grid is ({grid_size//2}, {grid_size//2}).
+
+
+Rules:
+- Draw the object in a recognizable way using the dots. 
+- A viewer seeing only the dot positions should immediately recognize the shape
+- For shapes with distinct top/bottom features (faces, animals): high y = top, low y = bottom
+- Return ONLY valid JSON, no extra text
+
+Format: {{"n_agents": <int>, "coordinates": [[x1, y1], [x2, y2], ...]}}
+
+Example — "triangle" (3 agents, one per vertex, tip pointing up):
+{{"n_agents": 3, "coordinates": [[32, 54], [10, 10], [54, 10]]}}
+
+IMPORTANT:
+- n_agents must be an integer between {min_agents} and {max_agents}
+- All coordinates must be integers in [0, {grid_size-1}]
+- coordinates array must have exactly n_agents entries
+- Output must be valid JSON (double quotes, proper brackets)"""
+
+    try:
+        response = client.chat.completions.create(
+            model=DEFAULT_SHAPE_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Generate a {prompt} formation"}
+            ],
+            temperature=0,
+        )
+        result = json.loads(response.choices[0].message.content.strip())
+        n = max(min_agents, min(max_agents, int(result["n_agents"])))
+        coords = [
+            [max(0, min(int(c[0]), grid_size - 1)), max(0, min(int(c[1]), grid_size - 1))]
+            for c in result["coordinates"][:n]
+        ]
+        while len(coords) < n:
+            coords.append(generate_default_circle(1, grid_size)[0])
+        return n, coords
+    except Exception as e:
+        print(f"LLM agent-count query failed: {e}. Falling back to 4-agent circle.")
+        return 4, generate_default_circle(4, grid_size)
 
 
 def generate_builtin_shape(prompt, n_agents=4, grid_size=64):
@@ -112,7 +206,7 @@ IMPORTANT:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4",  # Use gpt-4, gpt-4-turbo, or gpt-3.5-turbo
+            model=DEFAULT_SHAPE_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Generate a {prompt} with {n_agents} agents"}

@@ -1,6 +1,7 @@
 import torch
 import argparse
 import random
+import numpy as np
 from environment.grid_env import parallel_env
 from environment.train import train_mappo, load_actor
 from environment.train_improved import train_mappo_improved
@@ -149,6 +150,16 @@ def main():
                         help='In eval, sample actions stochastically instead of argmax')
     parser.add_argument('--easy_curriculum', action='store_true',
                         help='Training helper: force n_agents=4, no_llm, shape=circle')
+    parser.add_argument('--random_targets', action='store_true',
+                        help='Train with random target coordinates sampled each episode (generalizes across any formation)')
+    parser.add_argument('--min_target_distance', type=int, default=0,
+                        help='Minimum Chebyshev distance between random target pairs (0 = auto)')
+    parser.add_argument('--llm_agent_count', action='store_true',
+                        help='Let LLM decide n_agents based on the shape (eval/demo only; actor is n_agents-independent)')
+    parser.add_argument('--min_agents', type=int, default=2,
+                        help='Minimum agents when --llm_agent_count is used')
+    parser.add_argument('--max_agents', type=int, default=16,
+                        help='Maximum agents when --llm_agent_count is used')
 
     args = parser.parse_args()
 
@@ -182,8 +193,39 @@ def main():
 
     train_shapes = _parse_shape_list(args.train_shapes) if args.mode == 'train' else []
 
+    # LLM agent count: resolve n_agents before Step 1 and env creation (eval/demo only)
+    _skip_step1 = False
+    if args.llm_agent_count:
+        if args.mode == 'train':
+            print("Warning: --llm_agent_count is only effective in eval/demo mode. Ignoring.")
+        else:
+            from llm.shape_gen import BUILTIN_NATURAL_COUNTS, get_completion_with_agent_count
+            builtin_n = BUILTIN_NATURAL_COUNTS.get((args.shape or "").strip().lower())
+            if builtin_n is not None:
+                args.n_agents = builtin_n
+                target_coords = generate_builtin_shape(args.shape, n_agents=builtin_n, grid_size=64)
+            elif args.no_llm:
+                raise ValueError("--llm_agent_count with --no_llm requires a built-in shape (circle, square, triangle, line).")
+            else:
+                args.n_agents, target_coords = get_completion_with_agent_count(
+                    args.shape, grid_size=64, min_agents=args.min_agents, max_agents=args.max_agents)
+            target_coords_sampler = None
+            print(f"LLM chose {args.n_agents} agents for '{args.shape}'")
+            print(f"Target coordinates: {target_coords}\n")
+            _skip_step1 = True
+
     # Step 1: Generate target coordinates
-    if train_shapes:
+    if _skip_step1:
+        pass
+    elif args.mode == 'train' and args.random_targets:
+        from llm.shape_gen import generate_random_targets
+        _rng = np.random.default_rng(42)
+        _min_dist = args.min_target_distance if args.min_target_distance > 0 else max(2, 64 // (args.n_agents + 2))
+        target_coords = generate_random_targets(args.n_agents, min_distance=_min_dist, rng=_rng)
+        target_coords_sampler = lambda ep: generate_random_targets(args.n_agents, min_distance=_min_dist, rng=_rng)
+        print(f"Step 1: Random target training enabled (min_distance={_min_dist})")
+        print(f"Example target coordinates: {target_coords}\n")
+    elif train_shapes:
         print(f"Step 1: Precomputing training target coordinates for shapes: {train_shapes}...")
         target_bank = {}
         for shape_name in train_shapes:

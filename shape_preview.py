@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-from llm.shape_gen import gen_shape, generate_builtin_shape
+from llm.shape_gen import gen_shape, generate_builtin_shape, BUILTIN_NATURAL_COUNTS, get_completion_with_agent_count
 
 
 def resolve_target_coords(shape, n_agents, no_llm):
@@ -57,12 +57,28 @@ def main():
     parser.add_argument("--vis_dir", type=str, default="visualizations/shape_preview")
     parser.add_argument("--no_llm", action="store_true")
     parser.add_argument("--no_show", action="store_true")
+    parser.add_argument("--llm_agent_count", action="store_true",
+                        help="Let LLM decide n_agents based on the shape")
+    parser.add_argument("--min_agents", type=int, default=2)
+    parser.add_argument("--max_agents", type=int, default=16)
     args = parser.parse_args()
 
-    coords = resolve_target_coords(args.shape, args.n_agents, args.no_llm)
+    if args.llm_agent_count:
+        builtin_n = BUILTIN_NATURAL_COUNTS.get(args.shape.strip().lower())
+        if builtin_n is not None:
+            args.n_agents = builtin_n
+            coords = generate_builtin_shape(args.shape, n_agents=builtin_n, grid_size=64)
+        elif args.no_llm:
+            raise ValueError("--llm_agent_count with --no_llm requires a built-in shape.")
+        else:
+            args.n_agents, coords = get_completion_with_agent_count(
+                args.shape, grid_size=64, min_agents=args.min_agents, max_agents=args.max_agents)
+        print(f"LLM chose {args.n_agents} agents for '{args.shape}'")
+    else:
+        coords = resolve_target_coords(args.shape, args.n_agents, args.no_llm)
     os.makedirs(args.vis_dir, exist_ok=True)
     safe_shape = args.shape.replace(" ", "_")
-    save_path = os.path.join(args.vis_dir, f"{safe_shape}_{args.n_agents}.png")
+    save_path = os.path.join(args.vis_dir, f"{safe_shape}_{args.n_agents}agents.png")
 
     print(f"Generated coordinates for '{args.shape}':")
     for i, coord in enumerate(coords):

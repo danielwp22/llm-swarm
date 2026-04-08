@@ -32,7 +32,8 @@ import adafruit_blinka_raspberry_pi5_piomatter as piomatter
 
 from environment.grid_env import parallel_env
 from environment.model import ActorCNN, ActorMLP, dict_obs_to_tensor
-from llm.shape_gen import gen_shape, generate_default_circle
+from llm.shape_gen import gen_shape, generate_default_circle, get_completion_with_agent_count
+from cbs_solver import cbs_solve, pad_path
 
 
 # Configuration
@@ -133,27 +134,23 @@ def text_input_once(prompt=""):
 
 def get_yes_no(recognizer=None, use_text_input=False):
     """
-    Get yes/no response via voice or text.
+    Get yes/no response via typed y/n.
 
     Args:
-        recognizer: Vosk recognizer (required if use_text_input=False)
-        use_text_input: If True, use text input instead of voice
+        recognizer: Unused (kept for compatibility)
+        use_text_input: Unused (kept for compatibility)
 
     Returns:
         bool: True for yes, False for no
     """
     while True:
-        if use_text_input:
-            response = text_input_once("Enter 'yes' or 'no'").lower()
-        else:
-            response = listen_once(recognizer).lower()
-
-        if "yes" in response or "yeah" in response or "correct" in response or response == "y":
+        response = input("(y/n): ").strip().lower()
+        if response in ("y", "yes"):
             return True
-        elif "no" in response or "nope" in response or "wrong" in response or response == "n":
+        elif response in ("n", "no"):
             return False
         else:
-            print("Please say/type 'yes' or 'no'")
+            print("Please enter y or n")
 
 
 def extract_number(text):
@@ -321,11 +318,61 @@ def run_policy_on_matrix(actor, env, target_coords, n_agents, matrix, canvas, fr
     env.close()
 
 
+def run_cbs_on_matrix(paths, target_coords, matrix, canvas, framebuffer):
+    """
+    Replay pre-computed CBS paths on the LED matrix.
+
+    Args:
+        paths: Dict mapping agent names to list of (x, y) positions
+        target_coords: Target coordinates for display
+        matrix: LED matrix controller
+        canvas: PIL canvas
+        framebuffer: Numpy framebuffer
+    """
+    agents = list(paths.keys())
+    makespan = max(len(p) for p in paths.values())
+
+    print("\nStarting CBS formation display on LED matrix...")
+    print("Press Ctrl+C to stop\n")
+
+    try:
+        for t in range(makespan):
+            agent_positions = {}
+            for agent in agents:
+                path = paths[agent]
+                agent_positions[agent] = path[min(t, len(path) - 1)]
+
+            draw_grid(canvas, agent_positions, target_coords)
+            framebuffer[:] = np.asarray(canvas)
+            matrix.show()
+            time.sleep(STEP_DELAY)
+    except KeyboardInterrupt:
+        print("\n\nStopped by user")
+
+    # Hold final frame
+    final_positions = {agent: paths[agent][-1] for agent in agents}
+    draw_grid(canvas, final_positions, target_coords)
+    framebuffer[:] = np.asarray(canvas)
+    matrix.show()
+
+    print(f"\n✓ CBS formation complete ({makespan - 1} steps)")
+    print("\nPress Ctrl+C to exit...")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Interactive Formation Display')
     parser.add_argument('--text-input', action='store_true',
                        help='Use text input instead of voice recognition')
+    parser.add_argument('--cbs', action='store_true',
+                       help='Use CBS planner instead of trained MAPPO policy')
+    parser.add_argument('--llm-agents', action='store_true',
+                       help='Let the LLM choose the number of agents (overrides agent prompt)')
     args = parser.parse_args()
 
     print("="*60)
@@ -356,11 +403,6 @@ def main():
         recognizer = vosk.KaldiRecognizer(model, 16000)
         print("✓ Speech recognition ready\n")
 
-    # Initialize LED matrix
-    print("Initializing LED matrix...")
-    matrix, canvas, framebuffer = init_matrix()
-    print("✓ LED matrix ready\n")
-
     # Step 1: Get shape
     shape = None
     while shape is None:
@@ -376,7 +418,7 @@ def main():
                 continue
 
         print(f"{'Entered' if args.text_input else 'Heard'}: '{shape_text}'")
-        print("Is this correct? (yes/no)")
+        print("Is this correct?")
 
         if get_yes_no(recognizer, use_text_input=args.text_input):
             shape = shape_text
@@ -385,7 +427,9 @@ def main():
             print("Let's try again\n")
 
     # Step 2: Get number of agents
-    if SKIP_AGENT_PROMPT and DEFAULT_N_AGENTS is not None:
+    if args.llm_agents:
+        n_agents = None  # Will be set by LLM in step 3
+    elif SKIP_AGENT_PROMPT and DEFAULT_N_AGENTS is not None:
         # Use default without prompting
         n_agents = DEFAULT_N_AGENTS
         print(f"Using {n_agents} agents (default)\n")
@@ -417,7 +461,7 @@ def main():
                 continue
 
             print(f"{'Entered' if args.text_input else 'Heard'}: {n_agents} agents")
-            print("Is this correct? (yes/no)")
+            print("Is this correct?")
 
             if get_yes_no(recognizer, use_text_input=args.text_input):
                 print(f"✓ Number of agents confirmed: {n_agents}\n")
@@ -425,45 +469,76 @@ def main():
                 n_agents = None
                 print("Let's try again\n")
 
-    # Step 3: Generate target coordinates
-    print(f"Generating target coordinates for '{shape}' with {n_agents} agents...")
-    try:
-        target_coords = gen_shape(shape, n_agents=n_agents, grid_size=WIDTH)
-        print("✓ Generated using LLM")
-    except Exception as e:
-        print(f"LLM generation failed: {e}")
-        print("Using default circle formation")
-        target_coords = generate_default_circle(n_agents, grid_size=WIDTH)
+    # Step 3: Generate target coordinates (and optionally let LLM choose n_agents)
+    if args.llm_agents:
+        print(f"Asking LLM to choose agent count and generate '{shape}'...")
+        try:
+            n_agents, target_coords = get_completion_with_agent_count(shape, grid_size=WIDTH)
+            print(f"✓ LLM chose {n_agents} agents")
+        except Exception as e:
+            print(f"LLM agent-count query failed: {e}")
+            print("Falling back to default circle with 8 agents")
+            n_agents = 8
+            target_coords = generate_default_circle(n_agents, grid_size=WIDTH)
+    else:
+        print(f"Generating target coordinates for '{shape}' with {n_agents} agents...")
+        try:
+            target_coords = gen_shape(shape, n_agents=n_agents, grid_size=WIDTH)
+            print("✓ Generated using LLM")
+        except Exception as e:
+            print(f"LLM generation failed: {e}")
+            print("Using default circle formation")
+            target_coords = generate_default_circle(n_agents, grid_size=WIDTH)
 
-    print(f"Target coordinates: {target_coords}\n")
+    print(f"Target coordinates ({n_agents} agents): {target_coords}\n")
 
-    # Step 4: Load trained model
-    print("Loading trained model...")
-    if not os.path.exists(ACTOR_MODEL_PATH):
-        print(f"Error: Model not found at {ACTOR_MODEL_PATH}")
-        print("Please train a model first using: python main.py --mode train")
-        return
+    if args.cbs:
+        # Step 4 (CBS): Compute CBS paths and replay on matrix
+        print("Setting up environment to get start positions...")
+        env = parallel_env(render_mode=None, n_agents=n_agents, obs_radius=5)
+        obs, info = env.reset(seed=42, target_coords=target_coords)
+        starts = {agent: tuple(env.agent_positions[agent].astype(int)) for agent in env.possible_agents}
+        goals = {agent: tuple(env.target_positions[agent].astype(int)) for agent in env.possible_agents}
+        env.close()
 
-    # Select the correct actor class based on ACTOR_TYPE
-    ActorClass = ActorCNN if ACTOR_TYPE.lower() == "cnn" else ActorMLP
-    print(f"Using {ACTOR_TYPE.upper()} architecture")
+        print(f"Running CBS planner for {n_agents} agents...")
+        paths = cbs_solve(starts, goals, grid_size=WIDTH)
+        if paths is None:
+            print("CBS failed to find a conflict-free plan — aborting.")
+            return
+        makespan = max(len(p) for p in paths.values())
+        print(f"✓ CBS solved. Makespan: {makespan - 1} steps\n")
 
-    actor = ActorClass(obs_radius=5).to('cpu')
-    actor.load_state_dict(torch.load(ACTOR_MODEL_PATH, map_location='cpu'))
-    actor.eval()
-    print("✓ Model loaded\n")
+        print("Initializing LED matrix...")
+        matrix, canvas, framebuffer = init_matrix()
+        print("✓ LED matrix ready\n")
 
-    # Step 5: Create environment
-    print("Creating environment...")
-    env = parallel_env(
-        render_mode=None,
-        n_agents=n_agents,
-        obs_radius=5
-    )
-    print("✓ Environment ready\n")
+        run_cbs_on_matrix(paths, target_coords, matrix, canvas, framebuffer)
+    else:
+        # Step 4 (MAPPO): Load trained model
+        print("Loading trained model...")
+        if not os.path.exists(ACTOR_MODEL_PATH):
+            print(f"Error: Model not found at {ACTOR_MODEL_PATH}")
+            print("Please train a model first using: python main.py --mode train")
+            return
 
-    # Step 6: Run policy on LED matrix
-    run_policy_on_matrix(actor, env, target_coords, n_agents, matrix, canvas, framebuffer)
+        ActorClass = ActorCNN if ACTOR_TYPE.lower() == "cnn" else ActorMLP
+        print(f"Using {ACTOR_TYPE.upper()} architecture")
+
+        actor = ActorClass(obs_radius=5).to('cpu')
+        actor.load_state_dict(torch.load(ACTOR_MODEL_PATH, map_location='cpu'))
+        actor.eval()
+        print("✓ Model loaded\n")
+
+        print("Creating environment...")
+        env = parallel_env(render_mode=None, n_agents=n_agents, obs_radius=5)
+        print("✓ Environment ready\n")
+
+        print("Initializing LED matrix...")
+        matrix, canvas, framebuffer = init_matrix()
+        print("✓ LED matrix ready\n")
+
+        run_policy_on_matrix(actor, env, target_coords, n_agents, matrix, canvas, framebuffer)
 
     print("\n" + "="*60)
     print("Session complete!")

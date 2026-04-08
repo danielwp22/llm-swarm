@@ -50,6 +50,66 @@ def future_goal_blocked(agent, goal, time_step, constraints):
     return False
 
 
+def decentralized_cbs_solve(starts, goals, grid_size, obs_radius=5, local_avoidance=False):
+    """
+    Dec-POMDP CBS: agents plan with only local observability, matching the MARL setting.
+
+    Pure mode (local_avoidance=False): each agent runs independent A* with no knowledge
+    of other agents' paths. Agents will collide in simulation — this shows the cost of
+    having no coordination.
+
+    Local-avoidance mode (local_avoidance=True): step-by-step replanning where each agent
+    blocks currently-visible neighbors (Chebyshev distance <= obs_radius) as vertex
+    constraints at t=1 before taking its next step. This matches the MARL observation model.
+
+    Args:
+        starts: dict {agent_name: (x, y)}
+        goals:  dict {agent_name: (x, y)}
+        grid_size: int
+        obs_radius: observation radius for local_avoidance mode
+        local_avoidance: if True, use local-avoidance replanning; if False, pure independent A*
+    Returns:
+        dict {agent_name: [(x, y), ...]}
+    """
+    agents = list(starts.keys())
+
+    if not local_avoidance:
+        paths = {}
+        for agent in agents:
+            path = low_level_a_star(agent, starts[agent], goals[agent], grid_size, constraints=[])
+            paths[agent] = path if path else [tuple(starts[agent])]
+        return paths
+
+    # Local-avoidance mode: simulate step by step, replanning with visible-neighbor constraints
+    current = {a: tuple(starts[a]) for a in agents}
+    goal_t = {a: tuple(goals[a]) for a in agents}
+    paths = {a: [current[a]] for a in agents}
+
+    for _ in range(grid_size * 3):
+        if all(current[a] == goal_t[a] for a in agents):
+            break
+        new_current = {}
+        for agent in agents:
+            if current[agent] == goal_t[agent]:
+                new_current[agent] = current[agent]
+                paths[agent].append(current[agent])
+                continue
+            # Block positions of agents visible within obs_radius (Chebyshev distance)
+            visible_constraints = [
+                {"agent": agent, "type": "vertex", "loc": current[other], "time": 1}
+                for other in agents if other != agent
+                and max(abs(current[other][0] - current[agent][0]),
+                        abs(current[other][1] - current[agent][1])) <= obs_radius
+            ]
+            path = low_level_a_star(agent, current[agent], goal_t[agent], grid_size, visible_constraints)
+            nxt = path[1] if (path and len(path) >= 2) else current[agent]
+            new_current[agent] = nxt
+            paths[agent].append(nxt)
+        current = new_current
+
+    return paths
+
+
 def low_level_a_star(agent, start, goal, grid_size, constraints):
     max_constraint_time = 0
     for constraint in constraints:
@@ -238,10 +298,14 @@ def main():
     parser = argparse.ArgumentParser(description="Conflict-Based Search baseline for formation planning")
     parser.add_argument("--shape", type=str, default="circle")
     parser.add_argument("--n_agents", type=int, default=8)
-    parser.add_argument("--obs_radius", type=int, default=7)
+    parser.add_argument("--obs_radius", type=int, default=5)
     parser.add_argument("--vis_dir", type=str, default="visualizations/cbs")
     parser.add_argument("--no_animation", action="store_true")
     parser.add_argument("--no_llm", action="store_true")
+    parser.add_argument("--dec_pomdp", action="store_true",
+                        help="Run Dec-POMDP mode: agents plan with local observability only (no global coordination)")
+    parser.add_argument("--local_avoidance", action="store_true",
+                        help="In Dec-POMDP mode, agents avoid currently-visible neighbors via step-by-step replanning")
     args = parser.parse_args()
 
     target_coords = resolve_target_coords(args.shape, args.n_agents, args.no_llm)
@@ -254,10 +318,20 @@ def main():
 
     print(f"Starts: {starts}")
     print(f"Goals: {goals}")
-    print("Running CBS...")
-    paths = cbs_solve(starts, goals, grid_size=64)
-    if paths is None:
-        raise RuntimeError("CBS failed to find a conflict-free plan.")
+
+    if args.dec_pomdp:
+        mode_name = "local-avoidance" if args.local_avoidance else "independent A*"
+        print(f"Running Dec-POMDP CBS ({mode_name})...")
+        paths = decentralized_cbs_solve(
+            starts, goals, grid_size=64,
+            obs_radius=args.obs_radius, local_avoidance=args.local_avoidance)
+        if paths is None:
+            raise RuntimeError("Dec-POMDP planning failed.")
+    else:
+        print("Running centralized CBS...")
+        paths = cbs_solve(starts, goals, grid_size=64)
+        if paths is None:
+            raise RuntimeError("CBS failed to find a conflict-free plan.")
 
     total_cost, makespan = simulate_and_visualize(
         paths,
@@ -267,7 +341,8 @@ def main():
         vis_dir=args.vis_dir,
         no_animation=args.no_animation,
     )
-    print(f"CBS solved successfully. Sum of costs: {total_cost}, makespan: {makespan}")
+    mode_label = "Dec-POMDP CBS" if args.dec_pomdp else "CBS"
+    print(f"{mode_label} solved successfully. Sum of costs: {total_cost}, makespan: {makespan}")
     print(f"Visualization saved to {args.vis_dir}")
 
 
