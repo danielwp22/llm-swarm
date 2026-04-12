@@ -70,27 +70,27 @@ python pi/interactive_display.py --text-input --cbs --llm-agents # CBS planner, 
 
 ## Visualizations
 
-### CBS Planner — Circle Formation
+### CBS Planner — Square Formation
 
-<img src="assets/cbs_animation.gif" width="400" alt="CBS solver forming a circle">
+<img src="assets/cbs_animation.gif" width="400" alt="CBS solver forming a square">
 
-### MAPPO Policy — Formation
+### MAPPO Policy — Diamond Formation
 
-<img src="assets/mappo_animation.gif" width="400" alt="MAPPO agents forming a shape">
+<img src="assets/mappo_animation.gif" width="400" alt="MAPPO agents forming a diamond">
 
 ### LLM-Generated Shapes (shape_preview.py)
 
-| Tree (8 agents) | Umbrella (8 agents) |
+| Tree (16 agents) | Umbrella (16 agents) |
 |---|---|
-| <img src="assets/shapes/tree_8agents.png" width="250"> | <img src="assets/shapes/umbrella_8agents.png" width="250"> |
+| <img src="assets/shapes/tree_16agents.png" width="250"> | <img src="assets/shapes/umbrella_16agents.png" width="250"> |
 
 | Circle w/ line (16 agents) | Flower (16 agents) |
 |---|---|
 | <img src="assets/shapes/circle_with_a_line_through_it_16agents.png" width="250"> | <img src="assets/shapes/flower_16agents.png" width="250"> |
 
-| Smiley face (8 agents) | Tau (16 agents) |
+| Smiley face (16 agents) | Home (16 agents) |
 |---|---|
-| <img src="assets/shapes/smileyface_8agents.png" width="250"> | <img src="assets/shapes/tau_16agents.png" width="250"> |
+| <img src="assets/shapes/smileyface_16agents.png" width="250"> | <img src="assets/shapes/gallery_gpt_5_2_home.png" width="250"> |
 
 ## Key Arguments
 
