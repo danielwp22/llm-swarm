@@ -248,7 +248,7 @@ class parallel_env(ParallelEnv):
             step_penalty = -0.01  # Encourage faster convergence
 
             # Pay the arrival bonus only the first time an agent reaches its target.
-            just_arrived = distance < 1.5 and not self.arrival_bonus_awarded[agent]
+            just_arrived = distance < 2.5 and not self.arrival_bonus_awarded[agent]
             at_target_bonus = 10.0 if just_arrived else 0.0
             if just_arrived:
                 self.arrival_bonus_awarded[agent] = True
@@ -257,7 +257,7 @@ class parallel_env(ParallelEnv):
 
         # Check if all agents reached targets
         all_at_target = all(
-            np.linalg.norm(self.agent_positions[agent] - self.target_positions[agent]) < 1.5
+            np.linalg.norm(self.agent_positions[agent] - self.target_positions[agent]) < 2.5
             for agent in self.agents
         )
 

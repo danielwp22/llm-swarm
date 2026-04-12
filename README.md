@@ -1,732 +1,122 @@
-# Multi-Agent Formation Control with CTDE
+# Language-Conditioned Swarm Formation
 
-A multi-agent reinforcement learning project where agents learn to form shapes on a 64x64 grid using Centralized Training with Decentralized Execution (CTDE) and LLM-generated target coordinates.
+Multi-agent RL (MAPPO with CTDE) for swarm formation control on a 64×64 grid. Agents learn to assemble into geometric shapes from natural language descriptions — either via an LLM or built-in geometry. Includes a CBS classical planner baseline and a Raspberry Pi RGB LED display.
 
-## Project Structure
+## Quick Start
 
-```
-final_project/
-├── main.py                  # Main entry point
-├── train_improved.py        # Wrapper entry point for improved MAPPO trainer
-├── cbs_solver.py            # Conflict-Based Search baseline planner
-├── shape_preview.py         # Preview generated target shapes
-├── environment/
-│   ├── grid_env.py         # PettingZoo grid navigation environment
-│   ├── model.py            # Actor-Critic neural networks
-│   ├── train.py            # Baseline MAPPO training algorithm
-│   └── train_improved.py   # More MAPPO-like training variant
-├── llm/
-│   └── shape_gen.py        # LLM-based shape coordinate generation
-├── config/                 # Configuration files
-├── models/                 # Saved model checkpoints (created during training)
-└── requirements.txt        # Python dependencies
-```
-
-## Features
-
-- **64x64 Grid Environment**: Agents navigate in 8 directions (cardinal + diagonals)
-- **Local Observations**: Each agent observes a local radius around itself (CTDE principle)
-- **LLM Shape Generation**: Natural language → coordinates via OpenAI API
-- **MAPPO Training**: Multi-Agent Proximal Policy Optimization
-- **Improved MAPPO Variant**: Optional value normalization, Huber critic loss, richer critic inputs
-- **Collision Avoidance**: Agents are penalized for collisions with tracking metrics
-- **Formation Rewards**: Bonus rewards for reaching target formation
-- **Multi-Shape Training**: Sample different target formations during training for better generalization
-- **CBS Baseline**: Classical conflict-based search solver for comparison against RL
-- **Shape Preview Tool**: Render target coordinates for built-in or LLM-generated shapes
-- **GPU Acceleration**: Automatic CUDA detection for faster training
-- **Visualization Tools**: Matplotlib-based plotting and GIF animation generation
-
-## Installation
-
-1. Install dependencies:
 ```bash
 pip install -r requirements.txt
+export OPENAI_API_KEY="your-key-here"   # only needed for LLM shape generation
 ```
-
-2. (Optional) For GPU acceleration, install PyTorch with CUDA:
-```bash
-# For CUDA 11.8
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-
-# For CUDA 12.1
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-```
-
-3. Set up OpenAI API key (for LLM shape generation):
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-```
-
-### GPU Support
-
-The training automatically detects and uses CUDA if available. You'll see output like:
-
-```
-============================================================
-Multi-Agent Formation Control with CTDE
-============================================================
-Device: CUDA
-GPU: NVIDIA GeForce RTX 3090
-CUDA Version: 11.8
-============================================================
-```
-
-GPU training can be 10-50x faster than CPU, especially for larger agent counts.
 
 ## Usage
 
-### Training Mode
+### Train
 
-Train agents to form a circle with 8 agents (uses CNN by default, auto-detects GPU):
 ```bash
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000
+# General policy (random targets, recommended)
+python main.py --mode train --trainer improved --random_targets \
+    --n_agents 8 --n_episodes 10000 --actor_type mlp
+
+# Fixed shape
+python main.py --mode train --shape circle --n_agents 8 --n_episodes 5000
+
+# Resume from checkpoint
+python main.py --mode train --trainer improved --random_targets \
+    --n_agents 8 --n_episodes 8300 --actor_type mlp --resume_episode 1700
 ```
 
-Train with the improved MAPPO-style trainer:
+### Evaluate
+
 ```bash
-python train_improved.py --mode train --shape circle --n_agents 8 --n_episodes 1000
-```
-
-Train with MLP architecture:
-```bash
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp
-```
-
-Train the improved trainer with paper-style settings for a simple environment:
-```bash
-python train_improved.py --mode train --shape circle --n_agents 8 --n_episodes 5000 --obs_radius 7 --actor_type mlp --ppo_epochs 10 --num_mini_batch 1 --critic_input_type agent_specific
-```
-
-Train on multiple shapes for better generalization:
-```bash
-python train_improved.py --mode train --shape triangle --train_shapes circle,triangle,square,line --n_agents 8 --n_episodes 5000 --obs_radius 7 --actor_type mlp --ppo_epochs 10 --num_mini_batch 1 --critic_input_type agent_specific
-```
-
-Train both architectures for comparison:
-```bash
-# Train CNN
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type cnn --visualize
-
-# Train MLP (won't overwrite CNN models)
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000 --actor_type mlp --visualize
-```
-
-Train on a custom shape with explicit GPU usage:
-```bash
-python main.py --mode train --shape "square" --n_agents 4 --n_episodes 500 --device cuda
-```
-
-Train on CPU only:
-```bash
-python main.py --mode train --shape triangle --n_agents 6 --n_episodes 1000 --device cpu
-```
-
-Skip LLM and use default circle formation:
-```bash
-python main.py --mode train --no_llm --n_agents 6 --n_episodes 1000
-```
-
-Train with visualization enabled:
-```bash
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 500 --visualize
-```
-
-### Evaluation Mode
-
-Evaluate a trained CNN model (default):
-```bash
-python main.py --mode eval --shape circle --n_agents 8
-```
-
-Evaluate a trained MLP model:
-```bash
-python main.py --mode eval --shape circle --n_agents 8 --actor_type mlp
-```
-
-Evaluate the improved trainer and create plots/GIFs:
-```bash
-python train_improved.py --mode eval --shape circle --n_agents 8 --obs_radius 7 --actor_type mlp --visualize --vis_dir visualizations/improved_eval
-```
-
-Load from specific checkpoint:
-```bash
-python main.py --mode eval --actor_path models/actor_mlp_ep500.pt --critic_path models/critic_mlp_ep500.pt --actor_type mlp
-```
-
-Evaluate with visualization:
-```bash
-python main.py --mode eval --shape circle --n_agents 8 --visualize
-```
-
-### Demo Mode
-
-Run random policy for demonstration:
-```bash
-python main.py --mode demo --shape triangle --n_agents 6
-```
-
-### Shape Preview
-
-Preview a built-in target shape:
-```bash
-python shape_preview.py --shape triangle --n_agents 8 --no_llm
-```
-
-Preview an arbitrary LLM-generated shape:
-```bash
-python shape_preview.py --shape tree --n_agents 8
-```
-
-Save the preview without opening a window:
-```bash
-python shape_preview.py --shape tree --n_agents 8 --no_show --vis_dir visualizations/shape_preview
+python main.py --mode eval --trainer improved --random_targets \
+    --n_agents 8 --actor_type mlp --visualize
 ```
 
 ### CBS Baseline
 
-Run the conflict-based search planner and save its visualization:
 ```bash
-python cbs_solver.py --shape triangle --n_agents 8 --obs_radius 7 --vis_dir visualizations/cbs_triangle
+python cbs_solver.py --shape circle --n_agents 8 --vis_dir visualizations/cbs
 ```
 
-Use only built-in shapes for CBS:
+### Shape Preview
+
 ```bash
-python cbs_solver.py --shape triangle --n_agents 8 --obs_radius 7 --vis_dir visualizations/cbs_triangle --no_llm
+python shape_preview.py --shape tree --n_agents 8 --no_show --vis_dir visualizations/shape_preview
 ```
 
-## Command Line Arguments
+### Raspberry Pi LED Display
 
-- `--mode`: Operation mode (`train`, `eval`, `demo`)
-- `--trainer`: Training implementation (`baseline` or `improved`; default: `baseline`)
-- `--n_agents`: Number of agents (default: 4)
-- `--shape`: Shape description for LLM (default: 'circle')
-- `--train_shapes`: Comma-separated list of shapes to sample during training
-- `--n_episodes`: Training episodes (default: 1000)
-- `--obs_radius`: Local observation radius (default: 5)
-- `--device`: Device to use (`auto`, `cpu`, or `cuda`; default: 'auto')
-  - `auto`: Automatically detects and uses CUDA if available
-  - `cuda`: Force GPU usage (requires CUDA)
-  - `cpu`: Force CPU usage
-- `--actor_type`: Actor architecture (`mlp` or `cnn`; default: 'cnn')
-  - `cnn`: CNN-based actor (convolutional, more parameters, better for dense visual patterns)
-  - `mlp`: MLP-based actor (simpler, fewer parameters, better for sparse data)
-- `--actor_path`: Path to actor checkpoint (for eval mode; default: `models/actor_{actor_type}_final.pt`)
-- `--critic_path`: Path to critic checkpoint (for eval mode; default: `models/critic_{actor_type}_final.pt`)
-- `--no_llm`: Skip LLM, use default circle formation
-- `--visualize`: Create visualizations (plots and animations)
-- `--vis_dir`: Directory to save visualizations (default: 'visualizations')
-- `--no_animation`: Skip animation generation (faster, only creates static plots)
-- `--ppo_epochs`: Override PPO epochs
-- `--num_mini_batch`: Number of PPO mini-batches per epoch
-- `--critic_input_type`: Improved trainer critic input (`shared`, `agent_specific`, `full_local_concat`)
-- `--stochastic_eval`: Evaluate by sampling actions instead of using argmax
-- `--easy_curriculum`: Force a simple 4-agent circle training setup
-
-## Environment Details
-
-### Observation Space (per agent)
-- **local_grid**: (11×11×3) local view with channels: [empty, agents, obstacles]
-- **self_position**: (2,) normalized agent position [x, y]
-- **target_position**: (2,) normalized target position
-- **velocity**: (2,) velocity from last step
-
-### Action Space
-9 discrete actions:
-- 0: Stay
-- 1-8: Move in 8 directions (N, E, S, W, NE, SE, SW, NW)
-
-### Reward Function
-```python
-reward = -distance / (grid_size / 10)   # Main objective
-         - 0.5 * collision              # Collision penalty
-         - 0.01                         # Step penalty
-         + 10 * first_arrival_bonus     # One-time target bonus per agent
-         + 20 * all_at_target           # Formation bonus
+```bash
+python pi/interactive_display.py --text-input                    # MAPPO policy, text input
+python pi/interactive_display.py --text-input --cbs --llm-agents # CBS planner, LLM agent count
 ```
 
-## Algorithm: MAPPO
+## Architecture
 
-**Multi-Agent Proximal Policy Optimization**
+**Environment** — PettingZoo parallel env, 64×64 grid, 9 discrete actions (stay + 8 directions).
 
-- **Centralized Critic**: Uses global state (all agent observations) during training
-- **Decentralized Actor**: Each agent uses only local observations during execution
-- **PPO Loss**: Clipped surrogate objective with entropy regularization
-- **GAE**: Generalized Advantage Estimation for variance reduction
+**Observation** — 11×11×3 local grid patch + self position + target position + velocity.
 
-### Improved Trainer
+**Actor** — CNN (~587K params, default) or MLP (~231K params). Both output action logits over 9 actions.
 
-The improved trainer adds a more MAPPO-like comparison path:
+**Critic** — Centralized MLP over global state (all agent positions + targets). Used only during training (CTDE).
 
-- **Value normalization** for the critic target
-- **Huber critic loss** support
-- **Configurable critic inputs**
-  - `shared`: compact team summary only
-  - `agent_specific`: team summary plus the current agent's local grid and ID
-  - `full_local_concat`: all agents' local grids concatenated as a larger ablation
-- **Separate artifact directory**: `models/improved/`
-- **Wrapper entry point**: `python train_improved.py ...`
+**MAPPO** — Clipped surrogate PPO with GAE, 10 epochs per rollout. Improved trainer adds value normalization and Huber critic loss.
 
-## Neural Network Architecture
+**Target generation** — `llm/shape_gen.py` calls OpenAI API or uses built-in geometry.
 
-The project supports two Actor architectures that can be selected with `--actor_type`:
+**CBS baseline** — `cbs_solver.py` runs conflict-based search for optimal collision-free paths.
 
-### ActorCNN (Default)
-```
-CNN (3 layers) → Process local grid
-MLP → Process state features (position, target, relative position, velocity)
-Concatenate → FC layers → Action probabilities (9 actions)
+## Visualizations
 
-Parameters: ~587K
-Best for: Dense visual patterns
-```
+### CBS Planner — Circle Formation
 
-### ActorMLP (Alternative)
-```
-Flatten local grid (11×11×3 = 363) → Concatenate with state features (8)
-→ FC layers (256 → 256 → 128) → Action probabilities (9 actions)
+<img src="assets/cbs_animation.gif" width="400" alt="CBS solver forming a circle">
 
-Parameters: ~231K
-Best for: Sparse symbolic observations (60% fewer parameters)
-```
+### MAPPO Policy — Formation
 
-### Critic (Centralized)
-```
-Global state (all agents) → MLP (3 layers) → Value estimate
+<img src="assets/mappo_animation.gif" width="400" alt="MAPPO agents forming a shape">
 
-Parameters: ~133K
-```
+### LLM-Generated Shapes (shape_preview.py)
 
-**Architecture Selection:**
-- **CNN** is the default (better for visual patterns)
-- **MLP** is available as a lighter alternative (60% fewer parameters)
-- Both architectures can coexist in the same `models/` directory
+| Tree (8 agents) | Umbrella (8 agents) |
+|---|---|
+| <img src="assets/shapes/tree_8agents.png" width="250"> | <img src="assets/shapes/umbrella_8agents.png" width="250"> |
 
-## Training Hyperparameters
+| Circle w/ line (16 agents) | Flower (16 agents) |
+|---|---|
+| <img src="assets/shapes/circle_with_a_line_through_it_16agents.png" width="250"> | <img src="assets/shapes/flower_16agents.png" width="250"> |
 
-- Learning rate (actor): 3e-4
-- Learning rate (critic): 1e-3
-- Discount factor (γ): 0.99
-- GAE lambda (λ): 0.95
-- PPO epochs: 10
-- Clip epsilon: 0.2
-- Max gradient norm: 0.5
+| Smiley face (8 agents) | Tau (16 agents) |
+|---|---|
+| <img src="assets/shapes/smileyface_8agents.png" width="250"> | <img src="assets/shapes/tau_16agents.png" width="250"> |
 
-## Training Metrics
+## Key Arguments
 
-The training loop tracks and logs:
-- **Average Reward**: Mean reward per agent over last 100 episodes
-  - Should increase over time (less negative → positive)
-- **Average Episode Length**: Mean number of steps to completion
-  - Should decrease as agents learn more efficient paths
-- **Average Collisions**: Mean collision count per episode
-  - Should decrease over time as agents learn to avoid each other
-  - Well-trained agents typically have <2 collisions per episode
-- **Actor Loss**: Policy gradient loss
-  - Should stabilize after initial training
-- **Critic Loss**: Value function loss
-  - Should decrease and stabilize
-- **Entropy**: Policy entropy (encourages exploration)
-  - Should decrease over time as policy becomes more deterministic
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | — | `train`, `eval`, `demo` |
+| `--trainer` | `baseline` | `baseline` or `improved` |
+| `--actor_type` | `cnn` | `cnn` or `mlp` |
+| `--n_agents` | 4 | Number of agents |
+| `--shape` | `circle` | Shape name (LLM or built-in) |
+| `--random_targets` | off | Sample random targets each episode |
+| `--n_episodes` | 1000 | Training episodes |
+| `--obs_radius` | 5 | Local observation radius (→ 11×11 patch) |
+| `--visualize` | off | Save plots and GIFs |
+| `--vis_dir` | `visualizations` | Output directory |
+| `--resume_episode` | — | Resume from checkpoint (improved trainer only) |
+| `--device` | `auto` | `auto`, `cpu`, `cuda` |
 
 ## Model Checkpoints
 
-Models are saved in `models/` directory with architecture-specific naming:
-- Every 100 episodes: `actor_{actor_type}_ep{N}.pt`, `critic_{actor_type}_ep{N}.pt`
-- Final models: `actor_{actor_type}_final.pt`, `critic_{actor_type}_final.pt`
-
-**Examples:**
-- CNN: `actor_cnn_final.pt`, `actor_cnn_ep100.pt`, `actor_cnn_ep200.pt`
-- MLP: `actor_mlp_final.pt`, `actor_mlp_ep100.pt`, `actor_mlp_ep200.pt`
-
-This allows training and storing both architectures without conflicts.
-
-### Comparing Architectures
-
-To empirically compare CNN vs MLP performance:
-
-```bash
-# Train both with same settings
-python main.py --mode train --actor_type cnn --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/cnn
-python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000 --visualize --vis_dir results/mlp
-
-# Compare the training_rewards_collisions.png plots in both directories
-```
-
-**Expected Results:**
-- **CNN**: Default architecture, better for visual patterns, more parameters (~587K)
-- **MLP**: Faster training (fewer parameters ~231K), more efficient for sparse observations
-
-## Visualization
-
-The visualization tool creates **five types of outputs** when `--visualize` is enabled:
-
-### Training Metrics Plots (Generated After Training)
-
-#### 1. Comprehensive Metrics Dashboard
-6-panel visualization showing all training metrics:
-- **Episode Rewards**: Average reward per agent over time
-- **Collision Count**: Total collisions per episode
-- **Episode Duration**: Number of steps to completion
-- **Actor Loss**: Policy gradient loss
-- **Critic Loss**: Value function loss
-- **Policy Entropy**: Exploration metric
-
-Saved as: `visualizations/training_metrics.png`
-
-#### 2. Key Metrics Focus
-2-panel plot emphasizing rewards and collisions:
-- Raw values with semi-transparent lines
-- Moving average smoothing (automatically scaled window)
-- Clear trend visualization
-
-Saved as: `visualizations/training_rewards_collisions.png`
-
-### Formation Visualization Plots
-
-#### 3. Summary Plot
-Shows initial, middle, and final states side-by-side:
-- Agent trajectories color-coded by agent ID
-- Target positions marked with stars
-- Grid boundaries and collision markers
-
-Saved as: `visualizations/formation_summary.png`
-
-#### 4. Final Formation Plot
-Detailed view of the final formation with:
-- Complete agent trajectories
-- Final positions and target positions
-- Distance indicators between agents and targets
-
-Saved as: `visualizations/final_formation.png`
-
-#### 5. Animated GIF
-Full trajectory animation showing:
-- Agent movements step-by-step
-- Real-time collision detection
-- Progress indicator
-
-Saved as: `visualizations/formation_animation.gif`
-
-### Usage Examples
-
-**Train with full visualization (training metrics + formation):**
-```bash
-python main.py --mode train --shape circle --n_agents 8 --n_episodes 500 --visualize
-```
-
-**Train with visualization but skip animation (faster):**
-```bash
-python main.py --mode train --n_agents 4 --n_episodes 100 --visualize --no_animation
-```
-
-**Evaluate existing model (formation visualization only):**
-```bash
-python main.py --mode eval --n_agents 8 --visualize
-```
-
-**Custom output directory:**
-```bash
-python main.py --mode train --n_agents 4 --n_episodes 100 --visualize --vis_dir my_results
-```
-
-### Understanding Training Metrics
-
-**Rewards**: Should trend upward from negative to positive values as agents learn efficient paths to their targets.
-
-**Collisions**: Should decrease over time, indicating improved coordination and collision avoidance. Well-trained agents typically achieve <2 collisions per episode.
-
-**Episode Length**: Should decrease as agents find more direct routes to their targets.
-
-**Losses & Entropy**: Actor/Critic losses should stabilize, while entropy decreases as the policy becomes more deterministic.
-
----
-
-## Raspberry Pi RGB LED Display
-
-The project includes an interactive voice-controlled visualizer for Raspberry Pi 5 with a 64x64 RGB LED matrix display.
-
-### Hardware Requirements
-
-- Raspberry Pi 5
-- 64x64 RGB LED Matrix Panel
-- Adafruit RGB Matrix Bonnet
-- USB Microphone for voice input (optional, not needed with `--text-input`)
-- Speaker (optional, for audio feedback)
-
-### Installation on Raspberry Pi
-
-```bash
-# Install core Python dependencies
-pip3 install torch numpy pillow
-pip3 install adafruit_blinka_raspberry_pi5_piomatter
-
-# Install vosk for voice control (optional, skip if using --text-input)
-pip3 install vosk
-
-# Download Vosk speech recognition model (only needed for voice control)
-cd /path/to/llm_swarm
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-```
-
-### Usage
-
-#### Basic Usage (with voice control)
-```bash
-cd /path/to/llm_swarm
-python3 pi/interactive_display.py
-```
-
-The script will:
-1. Ask you to say a shape name (circle, square, triangle, etc.)
-2. Confirm what it heard with yes/no
-3. Use default 8 agents (configurable in script)
-4. Generate coordinates via LLM
-5. Display real-time formation on RGB matrix
-
-#### Text Input Mode (without voice recognition)
-```bash
-cd /path/to/llm_swarm
-python3 pi/interactive_display.py --text-input
-```
-
-Use this mode if:
-- You don't have a microphone available
-- Vosk speech recognition isn't installed
-- You prefer typing instead of speaking
-- You're testing the script without audio hardware
-
-#### Configuration
-
-Edit `pi/interactive_display.py` to customize:
-
-```python
-# Configuration at top of file
-ACTOR_MODEL_PATH = "models/actor_cnn_final.pt"  # Model to use
-ACTOR_TYPE = "cnn"  # "cnn" or "mlp"
-WIDTH = 64
-HEIGHT = 64
-STEP_DELAY = 0.1  # Seconds between animation frames
-DEFAULT_N_AGENTS = 8  # Default number of agents
-SKIP_AGENT_PROMPT = True  # Set to False to always ask for agent count
-```
-
-**To enable agent count prompts:**
-```python
-SKIP_AGENT_PROMPT = False  # Will ask for agent count via voice
-```
-
-**To change default agent count:**
-```python
-DEFAULT_N_AGENTS = 4  # Use 4 agents instead of 8
-```
-
-### Display Features
-
-- **Agent Visualization**: Each agent is a 2×2 bright colored square (10 distinct colors)
-- **Target Markers**: Dim gray pixels show formation target positions
-- **Motion Trails**: 10-step fading trail follows each agent
-- **Real-time Updates**: 10 FPS animation (0.1s between steps)
-- **Formation Complete**: Display freezes when all agents reach targets
-
-### Color Palette
-
-| Agent | Color   | RGB Value     |
-|-------|---------|---------------|
-| 0     | Red     | (255, 0, 0)   |
-| 1     | Green   | (0, 255, 0)   |
-| 2     | Blue    | (0, 0, 255)   |
-| 3     | Yellow  | (255, 255, 0) |
-| 4     | Magenta | (255, 0, 255) |
-| 5     | Cyan    | (0, 255, 255) |
-| 6     | Orange  | (255, 128, 0) |
-| 7     | Purple  | (128, 0, 255) |
-| 8     | White   | (255, 255, 255) |
-| 9     | Lime    | (128, 255, 0) |
-
-### Voice Commands
-
-**Shape Selection:**
-- Say: "circle", "square", "triangle", "line", "star", etc.
-- Confirm with: "yes" or "no"
-
-**Agent Count** (if SKIP_AGENT_PROMPT = False):
-- Say number as digit: "4", "8", "12"
-- Or say word: "four", "eight", "twelve"
-- Confirm with: "yes" or "no"
-
-### Troubleshooting
-
-**Vosk not installed or no microphone:**
-```bash
-# Use text input mode instead
-python3 pi/interactive_display.py --text-input
-```
-
-**Vosk model not found:**
-```bash
-# Download the model in your llm_swarm directory
-cd /path/to/llm_swarm
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-```
-
-**Audio device errors:**
-```bash
-# List audio devices
-arecord -l
-
-# Update device in script if needed (currently: plughw:2,0)
-
-# Or use text input mode as an alternative
-python3 pi/interactive_display.py --text-input
-```
-
-**Model not found:**
-Train a model first on your main machine, then copy to Pi:
-```bash
-# On main machine (default CNN)
-python main.py --mode train --n_agents 8 --n_episodes 1000
-
-# Copy to Raspberry Pi
-scp models/actor_cnn_final.pt pi@raspberrypi:/path/to/llm_swarm/models/
-
-# Or train with MLP if you prefer
-python main.py --mode train --actor_type mlp --n_agents 8 --n_episodes 1000
-scp models/actor_mlp_final.pt pi@raspberrypi:/path/to/llm_swarm/models/
-```
-
-**LED matrix not displaying:**
-- Check power supply (5V, 4A+ recommended for 64x64 matrix)
-- Verify Adafruit RGB Matrix Bonnet connection
-- Check jumper settings on bonnet
-
-### Demo Mode
-
-For demonstrations, configure for minimal interaction:
-```python
-SKIP_AGENT_PROMPT = True
-DEFAULT_N_AGENTS = 8
-```
-
-This allows quick shape selection without confirming agent count each time.
-
----
-
-## Example Output
-
-```
-============================================================
-Multi-Agent Formation Control with CTDE
-============================================================
-Device: CUDA
-GPU: NVIDIA GeForce RTX 4090
-CUDA Version: 12.1
-============================================================
-
-Step 1: Generating target coordinates for 'circle'...
-
-Generating circle formation for 8 agents on 64x64 grid...
-
-Generated coordinates:
-  Agent 0: [32, 48]
-  Agent 1: [45, 45]
-  Agent 2: [48, 32]
-  Agent 3: [45, 19]
-  Agent 4: [32, 16]
-  Agent 5: [19, 19]
-  Agent 6: [16, 32]
-  Agent 7: [19, 45]
-
-Step 2: Creating environment...
-Environment created with 8 agents
-
-Step 3: Training MAPPO policy...
-Starting MAPPO training for 1000 episodes...
-Device: cuda
-Number of agents: 8
-Target coordinates: [[32, 48], [45, 45], [48, 32], [45, 19], [32, 16], [19, 19], [16, 32], [19, 45]]
-
-Episode 10/1000
-  Avg Reward: -12.34
-  Avg Length: 245.60
-  Avg Collisions: 8.30
-  Actor Loss: 0.0234
-  Critic Loss: 0.1245
-  Entropy: 2.1234
-
-...
-
-Models saved at episode 100
-
-Training completed! Final models saved.
-
-============================================================
-Running trained policy...
-============================================================
-
-Success! All agents reached their targets in 87 steps!
-
-Total steps: 87
-Total reward: 142.56
-Total collisions: 3
-Average reward per agent per step: 0.2046
-Collision rate: 0.03 collisions/step
-
-Step 5: Creating visualizations...
-
-Generating training metrics plots...
-✓ Training metrics plot saved: visualizations/training_metrics.png
-✓ Key metrics plot saved: visualizations/training_rewards_collisions.png
-
-Generating formation visualizations...
-
-Creating visualizations in visualizations/...
-✓ Summary plot saved: visualizations/formation_summary.png
-✓ Final formation saved: visualizations/final_formation.png
-Saving animation to visualizations/formation_animation.gif...
-Animation saved successfully!
-✓ Animation saved: visualizations/formation_animation.gif
-
-Visualization complete! Files saved in visualizations/
-```
-
-## Troubleshooting
-
-**Import errors**: Make sure you're running from the project root directory
-
-**OpenAI API errors**: Check your API key is set correctly with `echo $OPENAI_API_KEY`
-
-**CUDA out of memory**:
-- Reduce `--n_agents` (fewer agents = less memory)
-- Use `--device cpu` to train on CPU instead
-- Reduce batch size or network hidden dimensions in code
-
-**CUDA not detected**:
-- Verify installation: `python -c "import torch; print(torch.cuda.is_available())"`
-- Check NVIDIA drivers: `nvidia-smi`
-- Reinstall PyTorch with CUDA support
-
-**Training not converging**:
-- Try reducing learning rates in `train.py`
-- Increase `--n_episodes`
-- Use simpler shapes with fewer agents initially
-
-## Future Improvements
-
-- [ ] Add attention mechanisms in Critic for better scalability
-- [ ] Implement curriculum learning (start with easier formations)
-- [ ] Add communication channels between agents
-- [x] Visualize agent movements with matplotlib (COMPLETED)
-- [ ] Support for dynamic obstacles
-- [ ] Multi-task learning across different shapes
-- [ ] Add tensorboard logging for collision metrics and training curves
-- [ ] Implement adaptive collision penalty based on training progress
-- [ ] Interactive visualization with real-time agent control
+- Baseline: `models/baseline/actor_{type}_final.pt`
+- Improved: `models/improved/actor_mlp_final.pt`
+- Intermediate checkpoints saved every 100 episodes (gitignored; only finals are tracked)
 
 ## References
 
-- MAPPO: [https://arxiv.org/abs/2103.01955](https://arxiv.org/abs/2103.01955)
-- PettingZoo: [https://pettingzoo.farama.org/](https://pettingzoo.farama.org/)
-- PPO: [https://arxiv.org/abs/1707.06347](https://arxiv.org/abs/1707.06347)
+- MAPPO: https://arxiv.org/abs/2103.01955
+- PettingZoo: https://pettingzoo.farama.org/
+- PPO: https://arxiv.org/abs/1707.06347

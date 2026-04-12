@@ -47,6 +47,28 @@ def generate_default_square(n_agents, grid_size=64):
     return coordinates
 
 
+def generate_default_diamond(n_agents, grid_size=64):
+    center = grid_size // 2
+    radius = grid_size // 3
+    vertices = np.array([
+        [center, center + radius],   # top
+        [center + radius, center],   # right
+        [center, center - radius],   # bottom
+        [center - radius, center],   # left
+    ], dtype=np.float32)
+    coords = []
+    for i in range(n_agents):
+        t = i / n_agents * 4        # [0, 4)
+        e = int(t) % 4
+        p = t - int(t)
+        pt = vertices[e] + p * (vertices[(e + 1) % 4] - vertices[e])
+        coords.append([
+            int(round(float(np.clip(pt[0], 0, grid_size - 1)))),
+            int(round(float(np.clip(pt[1], 0, grid_size - 1)))),
+        ])
+    return coords
+
+
 def generate_default_triangle(n_agents, grid_size=64):
     center = grid_size // 2
     radius = grid_size // 3
@@ -103,7 +125,62 @@ def generate_random_targets(n_agents, grid_size=64, min_distance=0, rng=None):
 BUILTIN_NATURAL_COUNTS = {"circle": 8, "square": 8, "triangle": 3, "line": 4}
 
 
-def get_completion_with_agent_count(prompt, grid_size=64, min_agents=2, max_agents=16):
+def _build_agent_count_prompt(variant, grid_size, min_agents, max_agents):
+    """Return system prompt for get_completion_with_agent_count variants."""
+    fmt = f'{{"n_agents": <int>, "coordinates": [[x1, y1], [x2, y2], ...]}}'
+    ex = f'{{"n_agents": 3, "coordinates": [[32, 54], [10, 10], [54, 10]]}}'
+    if variant == "minimal":
+        return (
+            f"Place between {min_agents} and {max_agents} agents on a {grid_size}x{grid_size} grid to form the requested shape. "
+            f"Choose the number of agents that best represents the shape. "
+            f"Return ONLY valid JSON: {fmt}"
+        )
+    if variant == "detailed":
+        return (
+            f"You are placing agents on a {grid_size}x{grid_size} grid to form a recognizable shape.\n\n"
+            f"Coordinate system: x increases RIGHT, y increases UP. y=0 is BOTTOM, y={grid_size-1} is TOP.\n"
+            f"Center of the grid is ({grid_size//2}, {grid_size//2}).\n\n"
+            f"Rules:\n"
+            f"- Draw the object in a recognizable way using the dots.\n"
+            f"- A viewer seeing only the dot positions should immediately recognize the shape\n"
+            f"- For shapes with distinct top/bottom features: high y = top, low y = bottom\n"
+            f"- Use enough agents to capture the shape's key features\n"
+            f"- Return ONLY valid JSON, no extra text\n\n"
+            f"Format: {fmt}\n\n"
+            f"Example — \"triangle\": {ex}\n"
+            f"Example — \"star\" (10 agents, alternating outer/inner points):\n"
+            f'{{"n_agents": 10, "coordinates": [[32,52],[39,39],[52,32],[39,25],[32,12],[25,25],[12,32],[25,39],[20,20],[44,20]]}}\n'
+            f"Example — \"house\" (12 agents, square base + triangular roof):\n"
+            f'{{"n_agents": 12, "coordinates": [[16,16],[32,16],[48,16],[48,24],[48,32],[32,32],[16,32],[16,24],[24,40],[32,50],[40,40],[32,32]]}}\n\n'
+            f"IMPORTANT:\n"
+            f"- n_agents must be an integer between {min_agents} and {max_agents}\n"
+            f"- All coordinates must be integers in [0, {grid_size-1}]\n"
+            f"- coordinates array must have exactly n_agents entries\n"
+            f"- Output must be valid JSON (double quotes, proper brackets)"
+        )
+    # standard (default)
+    return (
+        f"You are placing agents on a {grid_size}x{grid_size} grid to form a recognizable shape.\n\n"
+        f"Coordinate system: x increases RIGHT, y increases UP. So y=0 is the BOTTOM, y={grid_size-1} is the TOP.\n"
+        f"Center of the grid is ({grid_size//2}, {grid_size//2}).\n\n\n"
+        f"Rules:\n"
+        f"- Draw the object in a recognizable way using the dots. \n"
+        f"- A viewer seeing only the dot positions should immediately recognize the shape\n"
+        f"- For shapes with distinct top/bottom features (faces, animals): high y = top, low y = bottom\n"
+        f"- Return ONLY valid JSON, no extra text\n\n"
+        f"Format: {fmt}\n\n"
+        f"Example — \"triangle\" (3 agents, one per vertex, tip pointing up):\n"
+        f"{ex}\n\n"
+        f"IMPORTANT:\n"
+        f"- n_agents must be an integer between {min_agents} and {max_agents}\n"
+        f"- All coordinates must be integers in [0, {grid_size-1}]\n"
+        f"- coordinates array must have exactly n_agents entries\n"
+        f"- Output must be valid JSON (double quotes, proper brackets)"
+    )
+
+
+def get_completion_with_agent_count(prompt, grid_size=64, min_agents=2, max_agents=16,
+                                    model=None, prompt_variant="standard"):
     """
     Like get_completion but asks the LLM to decide the number of agents.
 
@@ -112,35 +189,17 @@ def get_completion_with_agent_count(prompt, grid_size=64, min_agents=2, max_agen
         grid_size: Grid size
         min_agents: Minimum agents the LLM may choose
         max_agents: Maximum agents the LLM may choose
+        model: OpenAI model name override (default: DEFAULT_SHAPE_MODEL)
+        prompt_variant: "standard" | "minimal" | "detailed"
     Returns:
         (n_agents: int, coordinates: List[[x, y]])
     """
-    system_prompt = f"""You are placing agents on a {grid_size}x{grid_size} grid to form a recognizable shape.
-
-Coordinate system: x increases RIGHT, y increases UP. So y=0 is the BOTTOM, y={grid_size-1} is the TOP.
-Center of the grid is ({grid_size//2}, {grid_size//2}).
-
-
-Rules:
-- Draw the object in a recognizable way using the dots. 
-- A viewer seeing only the dot positions should immediately recognize the shape
-- For shapes with distinct top/bottom features (faces, animals): high y = top, low y = bottom
-- Return ONLY valid JSON, no extra text
-
-Format: {{"n_agents": <int>, "coordinates": [[x1, y1], [x2, y2], ...]}}
-
-Example — "triangle" (3 agents, one per vertex, tip pointing up):
-{{"n_agents": 3, "coordinates": [[32, 54], [10, 10], [54, 10]]}}
-
-IMPORTANT:
-- n_agents must be an integer between {min_agents} and {max_agents}
-- All coordinates must be integers in [0, {grid_size-1}]
-- coordinates array must have exactly n_agents entries
-- Output must be valid JSON (double quotes, proper brackets)"""
+    model = model or DEFAULT_SHAPE_MODEL
+    system_prompt = _build_agent_count_prompt(prompt_variant, grid_size, min_agents, max_agents)
 
     try:
         response = client.chat.completions.create(
-            model=DEFAULT_SHAPE_MODEL,
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Generate a {prompt} formation"}
@@ -171,9 +230,59 @@ def generate_builtin_shape(prompt, n_agents=4, grid_size=64):
         return generate_default_square(n_agents, grid_size)
     if shape == "triangle":
         return generate_default_triangle(n_agents, grid_size)
+    if shape == "diamond":
+        return generate_default_diamond(n_agents, grid_size)
     return None
 
-def get_completion(prompt, n_agents=4, grid_size=64):
+def _build_system_prompt(variant, n_agents, grid_size):
+    """Return the system prompt for the requested variant."""
+    if variant == "minimal":
+        return (
+            f"Generate {n_agents} [x,y] integer coordinates on a {grid_size}x{grid_size} grid "
+            f"that outline the requested shape. "
+            f"Return ONLY a JSON array: [[x1,y1],[x2,y2],...]. No extra text."
+        )
+    if variant == "detailed":
+        return (
+            f"You are an intelligent coordinates generator for multi-agent formation control on a {grid_size}x{grid_size} grid.\n\n"
+            f"Your task:\n"
+            f"1. Given a shape description and number of agents, generate {n_agents} coordinates that form the shape\n"
+            f"2. Coordinates must be within bounds: 0 to {grid_size-1} for both x and y\n"
+            f"3. Spread points evenly to outline the shape (not fill it)\n"
+            f"4. Return ONLY a valid JSON array of coordinates, no extra text\n\n"
+            f"Format: [[x1, y1], [x2, y2], ..., [xN, yN]]\n\n"
+            f"Example for \"circle with 8 agents\":\n"
+            f"[[32, 48], [45, 45], [48, 32], [45, 19], [32, 16], [19, 19], [16, 32], [19, 45]]\n\n"
+            f"Example for \"star with 10 agents\" (alternating outer/inner points):\n"
+            f"[[32, 52], [38, 38], [52, 32], [38, 26], [32, 12], [26, 26], [12, 32], [26, 38], [20, 20], [44, 20]]\n\n"
+            f"Example for \"house with 8 agents\" (square base + triangular roof):\n"
+            f"[[18, 18], [46, 18], [46, 36], [18, 36], [18, 18], [32, 52], [46, 36], [18, 36]]\n\n"
+            f"IMPORTANT:\n"
+            f"- All coordinates must be integers between 0 and {grid_size-1}\n"
+            f"- Return exactly {n_agents} coordinate pairs\n"
+            f"- Output must be valid JSON (use double quotes, proper brackets)\n"
+            f"- Do not add any explanations or extra text"
+        )
+    # default: "standard"
+    return (
+        f"You are an intelligent coordinates generator for multi-agent formation control on a {grid_size}x{grid_size} grid.\n\n"
+        f"Your task:\n"
+        f"1. Given a shape description and number of agents, generate {n_agents} coordinates that form the shape\n"
+        f"2. Coordinates must be within bounds: 0 to {grid_size-1} for both x and y\n"
+        f"3. Spread points evenly to outline the shape (not fill it)\n"
+        f"4. Return ONLY a valid JSON array of coordinates, no extra text\n\n"
+        f"Format: [[x1, y1], [x2, y2], ..., [xN, yN]]\n\n"
+        f"Example for \"circle with 8 agents\":\n"
+        f"[[32, 48], [45, 45], [48, 32], [45, 19], [32, 16], [19, 19], [16, 32], [19, 45]]\n\n"
+        f"IMPORTANT:\n"
+        f"- All coordinates must be integers between 0 and {grid_size-1}\n"
+        f"- Return exactly {n_agents} coordinate pairs\n"
+        f"- Output must be valid JSON (use double quotes, proper brackets)\n"
+        f"- Do not add any explanations or extra text"
+    )
+
+
+def get_completion(prompt, n_agents=4, grid_size=64, model=None, prompt_variant="standard"):
     """
     Sends a prompt to the OpenAI API and returns the response content.
 
@@ -181,32 +290,18 @@ def get_completion(prompt, n_agents=4, grid_size=64):
         prompt: Natural language description of desired shape
         n_agents: Number of agents/coordinate points to generate
         grid_size: Size of the grid (default 64x64)
+        model: OpenAI model name (default: DEFAULT_SHAPE_MODEL)
+        prompt_variant: "standard" | "minimal" | "detailed"
 
     Returns:
         List of coordinates [[x1, y1], [x2, y2], ...]
     """
-    system_prompt = f"""You are an intelligent coordinates generator for multi-agent formation control on a {grid_size}x{grid_size} grid.
-
-Your task:
-1. Given a shape description and number of agents, generate {n_agents} coordinates that form the shape
-2. Coordinates must be within bounds: 0 to {grid_size-1} for both x and y
-3. Spread points evenly to outline the shape (not fill it)
-4. Return ONLY a valid JSON array of coordinates, no extra text
-
-Format: [[x1, y1], [x2, y2], ..., [xN, yN]]
-
-Example for "circle with 8 agents":
-[[32, 48], [45, 45], [48, 32], [45, 19], [32, 16], [19, 19], [16, 32], [19, 45]]
-
-IMPORTANT:
-- All coordinates must be integers between 0 and {grid_size-1}
-- Return exactly {n_agents} coordinate pairs
-- Output must be valid JSON (use double quotes, proper brackets)
-- Do not add any explanations or extra text"""
+    model = model or DEFAULT_SHAPE_MODEL
+    system_prompt = _build_system_prompt(prompt_variant, n_agents, grid_size)
 
     try:
         response = client.chat.completions.create(
-            model=DEFAULT_SHAPE_MODEL,
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Generate a {prompt} with {n_agents} agents"}
@@ -280,7 +375,7 @@ def generate_default_circle(n_agents, grid_size=64):
     return coordinates
 
 
-def gen_shape(prompt=None, n_agents=4, grid_size=64):
+def gen_shape(prompt=None, n_agents=4, grid_size=64, model=None, prompt_variant="standard"):
     """
     Main function to generate shape coordinates.
 
@@ -288,6 +383,8 @@ def gen_shape(prompt=None, n_agents=4, grid_size=64):
         prompt: Shape description (if None, will prompt user for input)
         n_agents: Number of agents
         grid_size: Grid size
+        model: OpenAI model name override (default: DEFAULT_SHAPE_MODEL)
+        prompt_variant: "standard" | "minimal" | "detailed"
 
     Returns:
         List of coordinates
@@ -302,7 +399,7 @@ def gen_shape(prompt=None, n_agents=4, grid_size=64):
     if builtin is not None:
         coordinates = builtin
     else:
-        coordinates = get_completion(prompt, n_agents, grid_size)
+        coordinates = get_completion(prompt, n_agents, grid_size, model=model, prompt_variant=prompt_variant)
 
     print(f"\nGenerated coordinates:")
     for i, coord in enumerate(coordinates):

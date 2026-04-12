@@ -17,22 +17,33 @@ export OPENAI_API_KEY="your-key-here"  # only needed for LLM shape generation
 python main.py --mode train --shape circle --n_agents 8 --n_episodes 1000
 
 # Train with improved MAPPO (value normalization, Huber loss)
-python train_improved.py --mode train --shape circle --n_agents 8 --n_episodes 5000
+python main.py --mode train --trainer improved --shape circle --n_agents 8 --n_episodes 5000
 
-# Multi-shape training for generalization
-python train_improved.py --mode train --train_shapes circle,triangle,square,line --n_agents 8 --n_episodes 5000
+# Train with random targets for generalization (preferred for general policy)
+python main.py --mode train --trainer improved --random_targets --n_agents 8 --n_episodes 10000 --actor_type mlp
 
-# Evaluate
+# Resume training from a checkpoint (adds n_episodes on top of resume_episode)
+python main.py --mode train --trainer improved --random_targets --n_agents 8 --n_episodes 8300 --actor_type mlp --resume_episode 1700
+
+# Multi-shape training (intermediate between fixed shape and random)
+python main.py --mode train --trainer improved --train_shapes circle,triangle,square,line --n_agents 8 --n_episodes 5000
+
+# Evaluate (--obs_radius and --actor_type must match the training run)
 python main.py --mode eval --shape circle --n_agents 8 --visualize
+python main.py --mode eval --trainer improved --random_targets --n_agents 8 --actor_type mlp --visualize
 
 # Preview target coordinates before training
 python shape_preview.py --shape circle --n_agents 8
 
 # Run CBS classical planner baseline
 python cbs_solver.py --shape triangle --n_agents 8 --vis_dir visualizations/cbs
+
+# LED matrix visualizer (Raspberry Pi)
+python pi/interactive_display.py --text-input                          # MAPPO policy, text input
+python pi/interactive_display.py --text-input --cbs --llm-agents       # CBS planner, LLM chooses agent count
 ```
 
-Key flags: `--mode` (train/eval/demo), `--trainer` (baseline/improved), `--actor_type` (cnn/mlp), `--n_agents`, `--shape`, `--n_episodes`, `--obs_radius` (default 5 → 11×11 local obs), `--device` (auto/cuda/cpu), `--visualize`, `--vis_dir`.
+Key flags: `--mode` (train/eval/demo), `--trainer` (baseline/improved), `--actor_type` (cnn/mlp), `--n_agents`, `--shape`, `--n_episodes`, `--obs_radius` (default 5 → 11×11 local obs), `--device` (auto/cuda/cpu), `--visualize`, `--vis_dir`, `--resume_episode` (improved trainer only).
 
 ## Architecture
 

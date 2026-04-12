@@ -160,6 +160,8 @@ def main():
                         help='Minimum agents when --llm_agent_count is used')
     parser.add_argument('--max_agents', type=int, default=16,
                         help='Maximum agents when --llm_agent_count is used')
+    parser.add_argument('--resume_episode', type=int, default=None,
+                        help='Resume improved training from checkpoint at this episode number (e.g. 1700 loads actor_mlp_ep1700.pt)')
 
     args = parser.parse_args()
 
@@ -295,6 +297,7 @@ def main():
                 ppo_epochs=ppo_epochs,
                 critic_input_type=args.critic_input_type,
                 use_clipped_value_loss=not args.no_clipped_value_loss,
+                resume_episode=args.resume_episode,
             )
         else:
             actor, critic, history = train_mappo(

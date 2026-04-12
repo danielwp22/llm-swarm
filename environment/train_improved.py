@@ -213,6 +213,7 @@ def train_mappo_improved(
     save_dir='models/improved',
     log_interval=10,
     actor_type='cnn',
+    resume_episode=None,
 ):
     """
     More MAPPO-like trainer for comparison with the baseline implementation.
@@ -234,6 +235,15 @@ def train_mappo_improved(
     critic_optimizer = optim.Adam(critic.parameters(), lr=lr_critic)
 
     os.makedirs(save_dir, exist_ok=True)
+
+    start_episode = 0
+    if resume_episode is not None:
+        actor_path = os.path.join(save_dir, f'actor_{actor_type}_ep{resume_episode}.pt')
+        critic_path = os.path.join(save_dir, f'critic_{actor_type}_ep{resume_episode}.pt')
+        actor.load_state_dict(torch.load(actor_path, map_location=device))
+        critic.load_state_dict(torch.load(critic_path, map_location=device))
+        start_episode = resume_episode
+        print(f"Resumed from episode {resume_episode} ({actor_path})\n")
 
     episode_rewards = deque(maxlen=100)
     episode_lengths = deque(maxlen=100)
@@ -260,9 +270,10 @@ def train_mappo_improved(
     print(f"Value normalization: {use_value_norm}")
     print(f"Huber critic loss: {use_huber_loss}\n")
 
-    for episode in range(n_episodes):
-        if n_episodes > 1:
-            progress = episode / (n_episodes - 1)
+    total_episodes = start_episode + n_episodes
+    for episode in range(start_episode, total_episodes):
+        if total_episodes > 1:
+            progress = episode / (total_episodes - 1)
             current_entropy_coef = entropy_coef + progress * (entropy_coef_end - entropy_coef)
         else:
             current_entropy_coef = entropy_coef
@@ -471,7 +482,7 @@ def train_mappo_improved(
         history['entropy'].append(total_entropy / denom)
 
         if (episode + 1) % log_interval == 0:
-            print(f"Episode {episode + 1}/{n_episodes}")
+            print(f"Episode {episode + 1}/{total_episodes}")
             print(f"  Avg Reward: {np.mean(episode_rewards):.2f}")
             print(f"  Avg Length: {np.mean(episode_lengths):.2f}")
             print(f"  Avg Collisions: {np.mean(episode_collisions):.2f}")
@@ -483,10 +494,17 @@ def train_mappo_improved(
         if (episode + 1) % 100 == 0:
             torch.save(actor.state_dict(), os.path.join(save_dir, f'actor_{actor_type}_ep{episode+1}.pt'))
             torch.save(critic.state_dict(), os.path.join(save_dir, f'critic_{actor_type}_ep{episode+1}.pt'))
-            print(f"Models saved at episode {episode + 1}\n")
+            print(f"Models saved at episode {episode + 1} (of {total_episodes})\n")
 
     torch.save(actor.state_dict(), os.path.join(save_dir, f'actor_{actor_type}_final.pt'))
     torch.save(critic.state_dict(), os.path.join(save_dir, f'critic_{actor_type}_final.pt'))
     print(f"Training completed! Final models saved to {save_dir}\n")
+
+    import json
+    history_path = os.path.join(save_dir, "training_history.json")
+    serializable_history = {k: [float(v) for v in vals] for k, vals in history.items()}
+    with open(history_path, "w") as _f:
+        json.dump(serializable_history, _f)
+    print(f"Training history saved to {history_path}")
 
     return actor, critic, history

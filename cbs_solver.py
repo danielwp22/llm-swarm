@@ -345,6 +345,12 @@ def main():
     print(f"{mode_label} solved successfully. Sum of costs: {total_cost}, makespan: {makespan}")
     print(f"Visualization saved to {args.vis_dir}")
 
+    import json as _json
+    _metrics = {"total_cost": total_cost, "makespan": makespan,
+                "mode": mode_label, "shape": args.shape, "n_agents": args.n_agents}
+    with open(os.path.join(args.vis_dir, "cbs_metrics.json"), "w") as _f:
+        _json.dump(_metrics, _f, indent=2)
+
 
 if __name__ == "__main__":
     main()
