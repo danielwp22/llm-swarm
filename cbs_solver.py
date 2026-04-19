@@ -194,7 +194,7 @@ def compute_cost(paths):
     return sum(len(path) - 1 for path in paths.values())
 
 
-def cbs_solve(starts, goals, grid_size):
+def cbs_solve(starts, goals, grid_size, max_nodes=2000):
     root_constraints = []
     root_paths = {}
     for agent, start in starts.items():
@@ -209,7 +209,7 @@ def cbs_solve(starts, goals, grid_size):
     heapq.heappush(open_list, (compute_cost(root_paths), 0 if root_conflict is None else 1, node_id, root_constraints, root_paths))
     node_id += 1
 
-    while open_list:
+    while open_list and node_id < max_nodes:
         _, _, _, constraints, paths = heapq.heappop(open_list)
         conflict = detect_conflict(paths)
         if conflict is None:
