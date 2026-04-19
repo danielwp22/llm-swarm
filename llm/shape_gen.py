@@ -8,7 +8,7 @@ from openai import OpenAI
 # Alternatively, you can pass the key explicitly: client = OpenAI(api_key="YOUR_API_KEY")
 client = OpenAI()
 
-DEFAULT_SHAPE_MODEL = os.getenv("OPENAI_SHAPE_MODEL", "gpt-5.2")
+DEFAULT_SHAPE_MODEL = os.getenv("OPENAI_SHAPE_MODEL", "gpt-4o")
 
 
 def _normalize_shape_name(prompt):

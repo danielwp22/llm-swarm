@@ -33,7 +33,7 @@ import adafruit_blinka_raspberry_pi5_piomatter as piomatter
 from environment.grid_env import parallel_env
 from environment.model import ActorCNN, ActorMLP, dict_obs_to_tensor
 from llm.shape_gen import gen_shape, generate_default_circle, get_completion_with_agent_count
-from cbs_solver import cbs_solve, decentralized_cbs_solve, pad_path
+from cbs_solver import decentralized_cbs_solve, pad_path
 
 
 # Configuration
@@ -502,12 +502,9 @@ def main():
         env.close()
 
         print(f"Running CBS planner for {n_agents} agents...")
-        paths = cbs_solve(starts, goals, grid_size=WIDTH)
-        if paths is None:
-            print("CBS hit node limit — falling back to decentralized local-avoidance planner...")
-            paths = decentralized_cbs_solve(
-                starts, goals, grid_size=WIDTH, obs_radius=5, local_avoidance=True
-            )
+        paths = decentralized_cbs_solve(
+            starts, goals, grid_size=WIDTH, obs_radius=5, local_avoidance=True
+        )
         makespan = max(len(p) for p in paths.values())
         print(f"✓ CBS solved. Makespan: {makespan - 1} steps\n")
 
